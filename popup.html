@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Guardar en Notion</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif; margin: 12px; min-width: 300px; }
+      .row { display: flex; gap: 8px; align-items: center; }
+      select, input, button, textarea { width: 100%; padding: 6px; font-size: 14px; }
+      button { cursor: pointer; }
+      small { color: #666; }
+      .error { color: #b00020; }
+      .success { color: #0b7a0b; }
+      .link { color: #1976d2; cursor: pointer; text-decoration: underline; }
+      #status { margin-top: 8px; min-height: 1.2em; }
+      #note { height: 60px; }
+    </style>
+  </head>
+  <body>
+    <h3 style="margin-top:0">Guardar en Notion</h3>
+    <div id="precheck"></div>
+    <div id="app" style="display:none">
+      <div class="row">
+        <input id="search" placeholder="Buscar bases de datos (opcional)" />
+        <button id="refresh" title="Refrescar">🔄</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <select id="databases"></select>
+      </div>
+      <div style="margin-top:8px">
+        <textarea id="note" placeholder="Nota opcional a incluir arriba del marcador"></textarea>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="save">Guardar en Notion</button>
+      </div>
+      <div id="status"></div>
+      <div style="margin-top:10px">
+        <small>¿Tokens no configurados? Abre <span id="openOptions" class="link">Opciones</span>.</small>
+      </div>
+    </div>
+    <script src="popup.js" type="module"></script>
+  </body>
+</html>

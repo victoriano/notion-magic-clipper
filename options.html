@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Opciones de la Extensión</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif; margin: 24px; max-width: 800px; }
+      label { display: block; margin-top: 16px; font-weight: 600; }
+      input, select { width: 100%; padding: 8px; font-size: 14px; }
+      small { color: #666; }
+      button { margin-top: 16px; padding: 8px 12px; font-size: 14px; cursor: pointer; }
+      .row { display: flex; gap: 12px; }
+      .col { flex: 1; }
+      .success { color: #0b7a0b; }
+      .error { color: #b00020; }
+      code { background: #f3f3f3; padding: 2px 4px; border-radius: 4px; }
+      a { color: #1976d2; }
+    </style>
+  </head>
+  <body>
+    <h2>Opciones</h2>
+    <p>Configura tu conexión con Notion y OpenAI (GPT-5 Nano).</p>
+
+    <label for="notionToken">Token de Integración de Notion</label>
+    <input id="notionToken" type="password" placeholder="secret_..." />
+    <small>
+      Crea una <b>Integración interna</b> y copia su token: 
+      <a href="https://www.notion.so/my-integrations" target="_blank" rel="noreferrer">my-integrations</a>. 
+      Luego comparte las bases de datos con esa integración. 
+      Documentación: <a href="https://www.notion.com/help/create-integrations-with-the-notion-api" target="_blank" rel="noreferrer">Notion Help</a>.
+    </small>
+
+    <label for="openaiKey">OpenAI API Key</label>
+    <input id="openaiKey" type="password" placeholder="sk-..." />
+    <small>Tu API key se guarda en el almacenamiento local de la extensión.</small>
+
+    <div class="row">
+      <div class="col">
+        <label for="reasoning">Esfuerzo de razonamiento (GPT-5)</label>
+        <select id="reasoning">
+          <option value="minimal">minimal</option>
+          <option value="low" selected>low</option>
+          <option value="medium">medium</option>
+          <option value="high">high</option>
+        </select>
+      </div>
+      <div class="col">
+        <label for="verbosity">Verbosidad (GPT-5)</label>
+        <select id="verbosity">
+          <option value="low" selected>low</option>
+          <option value="medium">medium</option>
+          <option value="high">high</option>
+        </select>
+      </div>
+    </div>
+
+    <button id="saveBtn">Guardar opciones</button>
+    <div id="status"></div>
+
+    <script type="module" src="options.js"></script>
+  </body>
+</html>
