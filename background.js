@@ -160,7 +160,8 @@ function extractSchemaForPrompt(database) {
       base.format = def.number?.format || 'number';
     }
     if (def.type === 'date') {
-      base.allow_time = true;
+      // date supports start/end/time_zone in Notion API
+      // Do not hint custom flags like "time" to avoid invalid outputs.
     }
     // people, files, relation, rollup etc. can be omitted or noted
     simplified[name] = base;
@@ -247,10 +248,43 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           parsed.properties[urlPropName] = { url: pageContext.url };
         }
 
+        // Sanitize properties against Notion API (e.g., remove unsupported date flags like "time")
+        function sanitizeProperties(db, props) {
+          const out = { ...props };
+          for (const [propName, def] of Object.entries(db.properties || {})) {
+            if (!out[propName]) continue;
+            if (def.type === 'date') {
+              const v = out[propName];
+              // Normalize to { date: { start, end?, time_zone? } }
+              if (typeof v === 'string') {
+                out[propName] = { date: { start: v } };
+              } else if (v && typeof v === 'object') {
+                if (typeof v.date === 'string') {
+                  out[propName] = { date: { start: v.date } };
+                } else if (v.date && typeof v.date === 'object') {
+                  const d = v.date;
+                  const cleaned = {};
+                  if (typeof d.start === 'string') cleaned.start = d.start;
+                  if (typeof d.end === 'string') cleaned.end = d.end;
+                  if (typeof d.time_zone === 'string') cleaned.time_zone = d.time_zone;
+                  out[propName] = { date: cleaned };
+                }
+              }
+              // Remove any stray flags the LLM might add
+              if (out[propName]?.date && typeof out[propName].date === 'object') {
+                delete out[propName].date.time;
+                delete out[propName].date.allow_time;
+              }
+            }
+          }
+          return out;
+        }
+
+        const safeProps = sanitizeProperties(db, parsed.properties);
+
         const blocks = buildBookmarkBlocks(pageContext.url, note);
-        const created = await createPageInDatabase(databaseId, parsed.properties, blocks);
-        sendResponse({ ok: true, page: created });
-      } catch (e) {
+        const created = await createPageInDatabase(databaseId, safeProps, blocks);
+        sendResponse({ ok: true, page: created });      } catch (e) {
         sendResponse({ ok: false, error: String(e.message || e) });
       }
       return;
