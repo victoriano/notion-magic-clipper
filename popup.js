@@ -103,7 +103,8 @@ async function save() {
     status.innerHTML = `<span class="error">${res?.error || 'Error al guardar'}</span>`;
     return;
   }
-  status.innerHTML = `<span class="success">Guardado correctamente ✅</span>`;
+  const pageUrl = res?.page?.url || res?.page?.public_url;
+  status.innerHTML = `<span class="success">Guardado correctamente ✅</span>` + (pageUrl ? `<div class="success-link"><a href="${pageUrl}" target="_blank" rel="noopener noreferrer">Abrir en Notion ↗</a></div>` : '');
 }
 
 async function main() {
