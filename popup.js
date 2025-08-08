@@ -58,9 +58,20 @@ async function loadDatabases() {
 }
 
 async function getPageContext(tabId) {
-  const res = await chrome.tabs.sendMessage(tabId, { type: 'GET_PAGE_CONTEXT' });
-  if (!res?.ok) throw new Error(res?.error || 'No se pudo obtener el contexto de la página');
-  return res.context;
+  try {
+    const res = await chrome.tabs.sendMessage(tabId, { type: 'GET_PAGE_CONTEXT' });
+    if (!res?.ok) throw new Error(res?.error || 'No se pudo obtener el contexto de la página');
+    return res.context;
+  } catch (err) {
+    const msg = String(err?.message || err || '');
+    const receivingEnd = msg.includes('Receiving end does not exist') || msg.includes('Could not establish connection');
+    if (!receivingEnd) throw err;
+    // Fallback: inject content script and retry
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['contentScript.js'] });
+    const res2 = await chrome.tabs.sendMessage(tabId, { type: 'GET_PAGE_CONTEXT' });
+    if (!res2?.ok) throw new Error(res2?.error || 'No se pudo obtener el contexto tras inyectar el content script');
+    return res2.context;
+  }
 }
 
 async function save() {

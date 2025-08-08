@@ -91,18 +91,29 @@ async function openaiChat(messages, { model = GPT5_NANO_MODEL, temperature = 0.2
     'Authorization': `Bearer ${openaiKey}`,
     'Content-Type': 'application/json'
   };
+
+  // Determine parameter support based on model
+  const isGPT5 = typeof model === 'string' && /^gpt-5/.test(model);
+  const isO1Series = typeof model === 'string' && /^o1/.test(model);
+  const supportsAdjustableTemperature = !(isGPT5 || isO1Series);
+
+  // Build payload conditionally to avoid unsupported params (e.g., temperature on GPT-5/o1)
+  const payload = { model, messages };
+  if (supportsAdjustableTemperature && typeof temperature === 'number') {
+    payload.temperature = temperature;
+  }
+  if (isGPT5 && typeof reasoning_effort === 'string') {
+    payload.reasoning_effort = reasoning_effort;
+  }
+  if (isGPT5 && typeof verbosity === 'string') {
+    payload.verbosity = verbosity;
+  }
+
   // Use Chat Completions for widest compatibility
   const resp = await fetch(`${OPENAI_API_BASE}/chat/completions`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({
-      model,
-      messages,
-      temperature,
-      // New GPT-5 parameters if supported on chat endpoint
-      reasoning_effort,
-      verbosity
-    })
+    body: JSON.stringify(payload)
   });
   if (!resp.ok) {
     const text = await resp.text().catch(() => '');
@@ -206,8 +217,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const content = await openaiChat(prompt, {
           model: GPT5_NANO_MODEL,
           reasoning_effort: openai_reasoning_effort || 'low',
-          verbosity: openai_verbosity || 'low',
-          temperature: 0.1
+          verbosity: openai_verbosity || 'low'
         });
 
         // Parse JSON block from content
