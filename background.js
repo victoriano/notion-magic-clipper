@@ -17,7 +17,8 @@ async function getConfig() {
         'openaiKey',
         'notionSearchQuery',
         'openai_reasoning_effort',
-        'openai_verbosity'
+        'openai_verbosity',
+        'databasePrompts'
       ],
       (res) => resolve(res)
     );
@@ -129,11 +130,11 @@ async function openaiChat(messages, { model = GPT5_NANO_MODEL, temperature = 0.2
 }
 
 // Build a prompt to map page context to Notion properties
-function buildPromptForProperties(schema, pageContext) {
+function buildPromptForProperties(schema, pageContext, customInstructions) {
   const { url, title, meta, selectionText, textSample } = pageContext;
   const schemaStr = JSON.stringify(schema, null, 2);
   const contextStr = JSON.stringify({ url, title, meta, selectionText, textSample }, null, 2);
-  return [
+  const messages = [
     {
       role: 'system',
       content:
@@ -145,6 +146,13 @@ function buildPromptForProperties(schema, pageContext) {
         `Esquema de la base de datos (propiedades):\n${schemaStr}\n\nContexto de la página:\n${contextStr}\n\nInstrucciones:\n- Rellena tantas propiedades como sea posible según el contexto.\n- Debe haber exactamente una propiedad de tipo "title" y debes establecer su valor con el mejor título posible.\n- Para propiedades de tipo select/multi_select, usa exclusivamente opciones existentes (coincidencia por nombre). Si no hay coincidencias claras, omite la propiedad.\n- Para dates, si no hay fecha específica en el contenido, puedes usar la fecha/hora actual.\n- Para url, establece la URL de la página si existe una propiedad apropiada.\n- Omite propiedades que no puedas determinar (no inventes valores).\n- NO incluyas propiedades de solo lectura (rollup, created_time, etc.).\n- Devuelve solo un objeto JSON con la forma { "properties": { ... } }.`
     }
   ];
+  if (customInstructions && typeof customInstructions === 'string' && customInstructions.trim().length > 0) {
+    messages.push({
+      role: 'user',
+      content: `Instrucciones personalizadas específicas para esta base de datos:\n${customInstructions.trim()}`
+    });
+  }
+  return messages;
 }
 
 function extractSchemaForPrompt(database) {
@@ -239,9 +247,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         const db = await getDatabase(databaseId);
         const schemaForLLM = extractSchemaForPrompt(db);
-        const prompt = buildPromptForProperties(schemaForLLM, pageContext);
+        const { openai_reasoning_effort, openai_verbosity, databasePrompts } = await getConfig();
+        const customInstructions = (databasePrompts || {})[databaseId] || '';
+        const prompt = buildPromptForProperties(schemaForLLM, pageContext, customInstructions);
 
-        const { openai_reasoning_effort, openai_verbosity } = await getConfig();
         const content = await openaiChat(prompt, {
           model: GPT5_NANO_MODEL,
           reasoning_effort: openai_reasoning_effort || 'low',

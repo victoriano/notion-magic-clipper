@@ -74,18 +74,11 @@ async function listAllDatabasesFromOptions() {
       // Fallback: fetch directly from Options page
       items = await searchAllDatabasesDirect(query);
     }
+    // Sync prompts with current accessible databases (drop missing, add new as empty)
+    const prompts = await syncPromptsWithDatabases(items);
+
     status.textContent = `Encontradas ${items.length} bases`;
-    for (const db of items) {
-      const li = document.createElement('li');
-      const a = document.createElement('a');
-      a.href = db.url;
-      const emoji = db.iconEmoji || '';
-      a.textContent = `${emoji ? emoji + ' ' : ''}${db.title}`;
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
-      li.appendChild(a);
-      listEl.appendChild(li);
-    }
+    renderAllDatabasesList(listEl, items, prompts);
   } catch (e) {
     status.textContent = String(e?.message || e);
   }
@@ -138,6 +131,110 @@ async function searchAllDatabasesDirect(query = '') {
 async function searchUntitledDatabasesDirect() {
   const all = await searchAllDatabasesDirect('');
   return all.filter((d) => !d.title || d.title.trim().length === 0 || d.title === '(Sin título)');
+}
+
+// ---- Prompts storage helpers ----
+async function getDatabasePrompts() {
+  const { databasePrompts } = await get(['databasePrompts']);
+  return databasePrompts && typeof databasePrompts === 'object' ? databasePrompts : {};
+}
+
+async function setDatabasePrompts(map) {
+  await set({ databasePrompts: map });
+}
+
+async function syncPromptsWithDatabases(databases) {
+  const existing = await getDatabasePrompts();
+  const next = {};
+  for (const db of databases || []) {
+    next[db.id] = Object.prototype.hasOwnProperty.call(existing, db.id) ? existing[db.id] : '';
+  }
+  await setDatabasePrompts(next);
+  return next;
+}
+
+function renderAllDatabasesList(container, items, prompts) {
+  container.innerHTML = '';
+  for (const db of items) {
+    const li = document.createElement('li');
+    const top = document.createElement('div');
+    const a = document.createElement('a');
+    a.href = db.url;
+    const emoji = db.iconEmoji || '';
+    a.textContent = `${emoji ? emoji + ' ' : ''}${db.title}`;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    const hasPrompt = (prompts[db.id] || '').trim().length > 0;
+    const badge = document.createElement('span');
+    badge.textContent = hasPrompt ? ' · prompt guardado' : '';
+    badge.style.color = hasPrompt ? '#0b7a0b' : '#666';
+    badge.style.fontSize = '12px';
+
+    const editBtn = document.createElement('button');
+    editBtn.textContent = 'Editar prompt';
+    editBtn.style.marginLeft = '8px';
+
+    top.appendChild(a);
+    top.appendChild(editBtn);
+    top.appendChild(badge);
+    li.appendChild(top);
+
+    const panel = document.createElement('div');
+    panel.style.display = 'none';
+    panel.style.marginTop = '8px';
+    const ta = document.createElement('textarea');
+    ta.rows = 4;
+    ta.style.width = '100%';
+    ta.placeholder = 'Instrucciones personalizadas para esta base (cómo mapear, qué propiedades priorizar, etc.)';
+    ta.value = prompts[db.id] || '';
+    const actions = document.createElement('div');
+    const saveBtn = document.createElement('button');
+    saveBtn.textContent = 'Guardar';
+    const clearBtn = document.createElement('button');
+    clearBtn.textContent = 'Borrar';
+    clearBtn.style.marginLeft = '8px';
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = 'Cerrar';
+    closeBtn.style.marginLeft = '8px';
+    const mini = document.createElement('span');
+    mini.style.marginLeft = '8px';
+
+    actions.appendChild(saveBtn);
+    actions.appendChild(clearBtn);
+    actions.appendChild(closeBtn);
+    actions.appendChild(mini);
+    panel.appendChild(ta);
+    panel.appendChild(actions);
+    li.appendChild(panel);
+
+    editBtn.addEventListener('click', () => {
+      panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+    });
+    saveBtn.addEventListener('click', async () => {
+      const text = ta.value.trim();
+      const current = await getDatabasePrompts();
+      current[db.id] = text;
+      await setDatabasePrompts(current);
+      mini.textContent = 'Guardado ✓';
+      mini.style.color = '#0b7a0b';
+      badge.textContent = text ? ' · prompt guardado' : '';
+      badge.style.color = text ? '#0b7a0b' : '#666';
+    });
+    clearBtn.addEventListener('click', async () => {
+      ta.value = '';
+      const current = await getDatabasePrompts();
+      current[db.id] = '';
+      await setDatabasePrompts(current);
+      mini.textContent = 'Borrado';
+      mini.style.color = '#666';
+      badge.textContent = '';
+    });
+    closeBtn.addEventListener('click', () => {
+      panel.style.display = 'none';
+    });
+
+    container.appendChild(li);
+  }
 }
 
 document.getElementById('saveBtn').addEventListener('click', save);
