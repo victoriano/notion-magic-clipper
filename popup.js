@@ -119,6 +119,55 @@ async function main() {
   });
   document.getElementById('save').addEventListener('click', save);
   document.getElementById('openOptions').addEventListener('click', () => chrome.runtime.openOptionsPage());
+
+  // History view navigation
+  const openHistoryBtn = document.getElementById('openHistory');
+  const historyView = document.getElementById('historyView');
+  const appView = document.getElementById('app');
+  const historyList = document.getElementById('historyList');
+  const historyStatus = document.getElementById('historyStatus');
+  const backBtn = document.getElementById('backToMain');
+  const clearBtn = document.getElementById('clearHistory');
+
+  async function loadHistory() {
+    historyStatus.textContent = '';
+    historyList.innerHTML = '';
+    const { recentSaves } = await getStorage(['recentSaves']);
+    const items = Array.isArray(recentSaves) ? recentSaves : [];
+    if (!items.length) {
+      historyStatus.textContent = 'No recent saves yet.';
+      return;
+    }
+    for (const it of items) {
+      const li = document.createElement('li');
+      const a = document.createElement('a');
+      a.href = it.url || '#';
+      a.textContent = (it.title ? it.title + ' – ' : '') + (it.databaseTitle ? it.databaseTitle : 'Notion');
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      const time = document.createElement('span');
+      const d = new Date(typeof it.ts === 'number' ? it.ts : Date.now());
+      time.textContent = '  ·  ' + d.toLocaleString();
+      time.style.color = '#666';
+      li.appendChild(a);
+      li.appendChild(time);
+      historyList.appendChild(li);
+    }
+  }
+
+  openHistoryBtn.addEventListener('click', async () => {
+    appView.style.display = 'none';
+    historyView.style.display = 'block';
+    await loadHistory();
+  });
+  backBtn.addEventListener('click', () => {
+    historyView.style.display = 'none';
+    appView.style.display = 'block';
+  });
+  clearBtn.addEventListener('click', async () => {
+    await setStorage({ recentSaves: [] });
+    await loadHistory();
+  });
 }
 
 main().catch((e) => {

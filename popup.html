@@ -38,6 +38,17 @@
       <div style="margin-top:10px">
         <small>Tokens not configured? Open <span id="openOptions" class="link">Options</span>.</small>
       </div>
+      <button id="openHistory" title="Recent saves" style="position: fixed; right: 8px; bottom: 8px; background: transparent; border: none; padding: 0; font-size: 18px; line-height: 1; width: auto; height: auto; -webkit-appearance: none; appearance: none;">🕒</button>
+    </div>
+
+    <div id="historyView" style="display:none">
+      <h3 style="margin-top:0">Recent saves</h3>
+      <div id="historyStatus"></div>
+      <ul id="historyList"></ul>
+      <div class="row" style="margin-top:8px">
+        <button id="backToMain">← Back</button>
+        <button id="clearHistory" style="width:auto">Clear</button>
+      </div>
     </div>
     <script src="popup.js" type="module"></script>
   </body>

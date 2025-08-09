@@ -86,6 +86,24 @@ async function createPageInDatabase(databaseId, properties, pageContentBlocks = 
   });
 }
 
+// Record a recent successful save for display in the popup history
+async function recordRecentSave(entry) {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['recentSaves'], (res) => {
+      const list = Array.isArray(res?.recentSaves) ? res.recentSaves : [];
+      const item = {
+        url: entry?.url || '',
+        ts: typeof entry?.ts === 'number' ? entry.ts : Date.now(),
+        databaseId: entry?.databaseId || '',
+        databaseTitle: entry?.databaseTitle || '',
+        title: entry?.title || ''
+      };
+      const next = [item, ...list].slice(0, 30);
+      chrome.storage.local.set({ recentSaves: next }, () => resolve());
+    });
+  });
+}
+
 // Ensure select/multi_select options exist in the database schema; create missing ones
 async function ensureSelectOptions(databaseId, props) {
   if (!props || typeof props !== 'object') return;
@@ -600,6 +618,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const addon = buildBookmarkBlocks(pageContext.url, note);
         const blocks = addon.concat(children);
         const created = await createPageInDatabase(databaseId, safeProps, blocks);
+        const pageUrl = created?.url || created?.public_url || '';
+        // Try to extract a final page title from properties
+        const titlePropNameFinal = Object.entries(db.properties || {}).find(([, def]) => def.type === 'title')?.[0];
+        const finalTitle = titlePropNameFinal && created?.properties?.[titlePropNameFinal]?.title
+          ? created.properties[titlePropNameFinal].title.map((t) => t?.plain_text || '').join('')
+          : undefined;
+        const dbTitle = Array.isArray(db?.title) ? db.title.map((t) => t.plain_text).join('') : '';
+        await recordRecentSave({ url: pageUrl, ts: Date.now(), databaseId, databaseTitle: dbTitle, title: finalTitle });
         sendResponse({ ok: true, page: created });      } catch (e) {
         sendResponse({ ok: false, error: String(e.message || e) });
       }
