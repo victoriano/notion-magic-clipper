@@ -96,7 +96,9 @@ async function recordRecentSave(entry) {
         ts: typeof entry?.ts === 'number' ? entry.ts : Date.now(),
         databaseId: entry?.databaseId || '',
         databaseTitle: entry?.databaseTitle || '',
-        title: entry?.title || ''
+        title: entry?.title || '',
+        sourceUrl: entry?.sourceUrl || '',
+        durationMs: typeof entry?.durationMs === 'number' ? entry.durationMs : undefined
       };
       const next = [item, ...list].slice(0, 30);
       chrome.storage.local.set({ recentSaves: next }, () => resolve());
@@ -617,7 +619,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // Always add user note and bookmark at the top if provided
         const addon = buildBookmarkBlocks(pageContext.url, note);
         const blocks = addon.concat(children);
+        // Prefer the start time from the popup for end-to-end duration; fallback to now
+        const t0 = typeof message.startedAt === 'number' ? message.startedAt : Date.now();
         const created = await createPageInDatabase(databaseId, safeProps, blocks);
+        const t1 = Date.now();
         const pageUrl = created?.url || created?.public_url || '';
         // Try to extract a final page title from properties
         const titlePropNameFinal = Object.entries(db.properties || {}).find(([, def]) => def.type === 'title')?.[0];
@@ -625,7 +630,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           ? created.properties[titlePropNameFinal].title.map((t) => t?.plain_text || '').join('')
           : undefined;
         const dbTitle = Array.isArray(db?.title) ? db.title.map((t) => t.plain_text).join('') : '';
-        await recordRecentSave({ url: pageUrl, ts: Date.now(), databaseId, databaseTitle: dbTitle, title: finalTitle });
+        await recordRecentSave({ url: pageUrl, ts: Date.now(), databaseId, databaseTitle: dbTitle, title: finalTitle, sourceUrl: pageContext.url || '', durationMs: t1 - t0 });
         sendResponse({ ok: true, page: created });      } catch (e) {
         sendResponse({ ok: false, error: String(e.message || e) });
       }

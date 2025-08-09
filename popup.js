@@ -84,6 +84,8 @@ async function save() {
     status.textContent = 'Debes seleccionar una base de datos.';
     return;
   }
+  // Record when the save was initiated by the user
+  const startedAt = Date.now();
   const tab = await getCurrentTab();
   let context;
   try {
@@ -98,7 +100,8 @@ async function save() {
     type: 'SAVE_TO_NOTION',
     databaseId,
     pageContext: context,
-    note
+    note,
+    startedAt
   });
   if (!res?.ok) {
     status.innerHTML = `<span class="error">${res?.error || 'Error saving'}</span>`;
@@ -140,16 +143,28 @@ async function main() {
     }
     for (const it of items) {
       const li = document.createElement('li');
-      const a = document.createElement('a');
-      a.href = it.url || '#';
-      a.textContent = (it.title ? it.title + ' – ' : '') + (it.databaseTitle ? it.databaseTitle : 'Notion');
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
+      const notionLink = document.createElement('a');
+      notionLink.href = it.url || '#';
+      notionLink.textContent = (it.title ? it.title + ' – ' : '') + (it.databaseTitle ? it.databaseTitle : 'Notion');
+      notionLink.target = '_blank';
+      notionLink.rel = 'noopener noreferrer';
+
+      const sourceLink = document.createElement('a');
+      sourceLink.href = it.sourceUrl || '#';
+      sourceLink.textContent = ' 🔗';
+      sourceLink.title = 'Open original page';
+      sourceLink.style.marginLeft = '6px';
+      sourceLink.target = '_blank';
+      sourceLink.rel = 'noopener noreferrer';
+
       const time = document.createElement('span');
       const d = new Date(typeof it.ts === 'number' ? it.ts : Date.now());
-      time.textContent = '  ·  ' + d.toLocaleString();
+      const took = typeof it.durationMs === 'number' ? `  ·  ${Math.round(it.durationMs / 1000)}s` : '';
+      time.textContent = '  ·  ' + d.toLocaleString() + took;
       time.style.color = '#666';
-      li.appendChild(a);
+
+      li.appendChild(notionLink);
+      if (it.sourceUrl) li.appendChild(sourceLink);
       li.appendChild(time);
       historyList.appendChild(li);
     }
