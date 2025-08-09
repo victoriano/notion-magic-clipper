@@ -330,52 +330,140 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           throw new Error('Falta la clave "properties" en la salida del modelo.');
         }
 
-        // Ensure title property is set; if not, attempt fallback to first title
-        const titlePropName = Object.entries(db.properties || {}).find(([, def]) => def.type === 'title')?.[0];
-        if (titlePropName && !parsed.properties[titlePropName]) {
-          parsed.properties[titlePropName] = {
-            title: [ { type: 'text', text: { content: pageContext.title || pageContext.meta?.['og:title'] || pageContext.url || 'Sin título' } } ]
-          };
-        }
         // Ensure a URL property is set if schema has one and model omitted it
         const urlPropName = Object.entries(db.properties || {}).find(([, def]) => def.type === 'url')?.[0];
         if (urlPropName && !parsed.properties[urlPropName] && pageContext.url) {
           parsed.properties[urlPropName] = { url: pageContext.url };
         }
 
-        // Sanitize properties against Notion API (e.g., remove unsupported date flags like "time")
+        // Sanitize and normalize properties to valid Notion API shapes
         function sanitizeProperties(db, props) {
-          const out = { ...props };
-          for (const [propName, def] of Object.entries(db.properties || {})) {
-            if (!out[propName]) continue;
-            if (def.type === 'date') {
-              const v = out[propName];
-              // Normalize to { date: { start, end?, time_zone? } }
-              if (typeof v === 'string') {
-                out[propName] = { date: { start: v } };
-              } else if (v && typeof v === 'object') {
-                if (typeof v.date === 'string') {
-                  out[propName] = { date: { start: v.date } };
-                } else if (v.date && typeof v.date === 'object') {
-                  const d = v.date;
-                  const cleaned = {};
-                  if (typeof d.start === 'string') cleaned.start = d.start;
-                  if (typeof d.end === 'string') cleaned.end = d.end;
-                  if (typeof d.time_zone === 'string') cleaned.time_zone = d.time_zone;
-                  out[propName] = { date: cleaned };
-                }
+          const out = {};
+          const schema = db.properties || {};
+
+          function toRichText(text) {
+            const content = typeof text === 'string' ? text : '';
+            return [{ type: 'text', text: { content } }];
+          }
+
+          function normalizeValueByType(def, value) {
+            const type = def.type;
+            if (value == null) return undefined;
+            switch (type) {
+              case 'title': {
+                if (Array.isArray(value?.title)) return { title: value.title };
+                if (typeof value === 'string') return { title: toRichText(value) };
+                if (typeof value?.text === 'string') return { title: toRichText(value.text) };
+                if (Array.isArray(value)) return { title: value };
+                return undefined;
               }
-              // Remove any stray flags the LLM might add
-              if (out[propName]?.date && typeof out[propName].date === 'object') {
+              case 'rich_text': {
+                if (Array.isArray(value?.rich_text)) return { rich_text: value.rich_text };
+                if (typeof value === 'string') return { rich_text: toRichText(value) };
+                if (typeof value?.text === 'string') return { rich_text: toRichText(value.text) };
+                if (Array.isArray(value)) return { rich_text: value };
+                return undefined;
+              }
+              case 'url': {
+                const url = typeof value === 'string' ? value : value?.url;
+                if (typeof url === 'string' && url.length > 0) return { url };
+                return undefined;
+              }
+              case 'email': {
+                const email = typeof value === 'string' ? value : value?.email;
+                if (typeof email === 'string' && email.length > 0) return { email };
+                return undefined;
+              }
+              case 'phone_number': {
+                const phone = typeof value === 'string' ? value : value?.phone_number;
+                if (typeof phone === 'string' && phone.length > 0) return { phone_number: phone };
+                return undefined;
+              }
+              case 'number': {
+                const num = typeof value === 'number' ? value : Number(value?.number ?? value);
+                if (!Number.isNaN(num)) return { number: num };
+                return undefined;
+              }
+              case 'checkbox': {
+                const bool = typeof value === 'boolean' ? value : (typeof value === 'string' ? value.toLowerCase() === 'true' : undefined);
+                if (typeof bool === 'boolean') return { checkbox: bool };
+                return undefined;
+              }
+              case 'select': {
+                const name = typeof value === 'string' ? value : value?.select?.name ?? value?.name;
+                if (typeof name === 'string' && name.length > 0) return { select: { name } };
+                return undefined;
+              }
+              case 'multi_select': {
+                const arr = Array.isArray(value) ? value : (Array.isArray(value?.multi_select) ? value.multi_select : (typeof value === 'string' ? value.split(',') : undefined));
+                if (Array.isArray(arr)) return { multi_select: arr.map((v) => ({ name: typeof v === 'string' ? v.trim() : v?.name }).filter(Boolean)) };
+                return undefined;
+              }
+              case 'status': {
+                const name = typeof value === 'string' ? value : value?.status?.name ?? value?.name;
+                if (typeof name === 'string' && name.length > 0) return { status: { name } };
+                return undefined;
+              }
+              case 'date': {
+                // Normalize to { date: { start, end?, time_zone? } }
+                if (typeof value === 'string') return { date: { start: value } };
+                if (value && typeof value === 'object') {
+                  if (typeof value.date === 'string') return { date: { start: value.date } };
+                  if (value.date && typeof value.date === 'object') {
+                    const d = value.date;
+                    const cleaned = {};
+                    if (typeof d.start === 'string') cleaned.start = d.start;
+                    if (typeof d.end === 'string') cleaned.end = d.end;
+                    if (typeof d.time_zone === 'string') cleaned.time_zone = d.time_zone;
+                    if (Object.keys(cleaned).length > 0) return { date: cleaned };
+                  }
+                  // Accept shorthand { start, end?, time_zone? }
+                  if (typeof value.start === 'string' || typeof value.end === 'string' || typeof value.time_zone === 'string') {
+                    const cleaned = {};
+                    if (typeof value.start === 'string') cleaned.start = value.start;
+                    if (typeof value.end === 'string') cleaned.end = value.end;
+                    if (typeof value.time_zone === 'string') cleaned.time_zone = value.time_zone;
+                    return { date: cleaned };
+                  }
+                }
+                return undefined;
+              }
+              default:
+                // For people, files, relation, rollup etc., skip unless the model provided a valid object we recognize
+                return undefined;
+            }
+          }
+
+          // Normalize only properties that exist in schema
+          for (const [propName, def] of Object.entries(schema)) {
+            const raw = props[propName];
+            if (raw === undefined) continue;
+            const normalized = normalizeValueByType(def, raw);
+            if (normalized && typeof normalized === 'object' && Object.keys(normalized).length > 0) {
+              out[propName] = normalized;
+              // Remove stray flags on date
+              if (def.type === 'date' && out[propName]?.date && typeof out[propName].date === 'object') {
                 delete out[propName].date.time;
                 delete out[propName].date.allow_time;
               }
             }
           }
+
           return out;
         }
 
-        const safeProps = sanitizeProperties(db, parsed.properties);
+        let safeProps = sanitizeProperties(db, parsed.properties);
+        // Ensure title property exists with a valid shape
+        const titlePropName = Object.entries(db.properties || {}).find(([, def]) => def.type === 'title')?.[0];
+        if (titlePropName) {
+          const existing = safeProps[titlePropName];
+          const hasValidTitle = Array.isArray(existing?.title) && existing.title.length > 0;
+          if (!hasValidTitle) {
+            safeProps[titlePropName] = {
+              title: [ { type: 'text', text: { content: pageContext.title || pageContext.meta?.['og:title'] || pageContext.url || 'Untitled' } } ]
+            };
+          }
+        }
         let children = [];
         if (parsed.children || parsed.blocks || parsed.content) {
           children = sanitizeBlocks(parsed.children || parsed.blocks || parsed.content || []);
