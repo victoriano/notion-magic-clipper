@@ -46,7 +46,8 @@ export async function searchAllDatabases(notionToken, options = {}) {
     for (const item of results) {
       const title = (item?.title || []).map((t) => t?.plain_text || '').join('') || '(Sin título)';
       const url = item.url || `https://www.notion.so/${String(item.id || '').replace(/-/g, '')}`;
-      all.push({ id: item.id, title, url });
+      const iconEmoji = item?.icon?.type === 'emoji' ? item.icon.emoji : undefined;
+      all.push({ id: item.id, title, url, iconEmoji });
     }
     cursor = data.has_more ? data.next_cursor : null;
   } while (cursor);

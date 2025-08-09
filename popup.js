@@ -52,7 +52,8 @@ async function loadDatabases() {
   list.forEach((db) => {
     const opt = document.createElement('option');
     opt.value = db.id;
-    opt.textContent = db.title + ' (' + db.id.slice(0, 6) + '...)';
+    const emoji = db.iconEmoji || '';
+    opt.textContent = (emoji ? `${emoji} ` : '') + db.title;
     sel.appendChild(opt);
   });
 }

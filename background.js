@@ -63,7 +63,8 @@ async function listDatabases(query = '') {
     const title = (item.title || [])
       .map((t) => t.plain_text)
       .join('') || '(Sin título)';
-    return { id: item.id, title };
+    const iconEmoji = item?.icon?.type === 'emoji' ? item.icon.emoji : undefined;
+    return { id: item.id, title, iconEmoji };
   });
   return results;
 }

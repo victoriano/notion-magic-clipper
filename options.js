@@ -79,7 +79,8 @@ async function listAllDatabasesFromOptions() {
       const li = document.createElement('li');
       const a = document.createElement('a');
       a.href = db.url;
-      a.textContent = `${db.title} (${db.id.slice(0, 6)}...)`;
+      const emoji = db.iconEmoji || '';
+      a.textContent = `${emoji ? emoji + ' ' : ''}${db.title}`;
       a.target = '_blank';
       a.rel = 'noopener noreferrer';
       li.appendChild(a);
@@ -126,7 +127,8 @@ async function searchAllDatabasesDirect(query = '') {
     for (const item of results) {
       const title = (item?.title || []).map((t) => t?.plain_text || '').join('') || '(Sin título)';
       const url = item.url || `https://www.notion.so/${String(item.id || '').replace(/-/g, '')}`;
-      all.push({ id: item.id, title, url });
+      const iconEmoji = item?.icon?.type === 'emoji' ? item.icon.emoji : undefined;
+      all.push({ id: item.id, title, url, iconEmoji });
     }
     cursor = data.has_more ? data.next_cursor : null;
   } while (cursor);
