@@ -137,13 +137,30 @@ function buildPromptForProperties(schema, pageContext, customInstructions) {
   const messages = [
     {
       role: 'system',
-      content:
-        'Eres un asistente que genera valores de propiedades de Notion dados un esquema de base de datos y el contexto de una página web. Devuelve únicamente JSON válido con la clave "properties" exactamente en el formato de la API de Notion para crear páginas. No incluyas comentarios, texto adicional ni explicaciones.'
+      content: [
+        'Eres un asistente que genera tanto PROPIEDADES como CONTENIDO de Notion dados un esquema de base de datos y el contexto de una página web.',
+        'Devuelve únicamente JSON VÁLIDO con la forma { "properties": { ... }, "children"?: [ ... ] }.',
+        '- "properties": exactamente en el formato de la API de Notion para crear páginas, validando tipos del esquema.',
+        '- "children" (opcional): lista de bloques de Notion para el contenido, usando SOLO: paragraph, heading_1, heading_2, heading_3, bulleted_list_item, numbered_list_item, quote, bookmark.',
+        'Usa rich_text simples con texto en cada bloque; no incluyas comentarios ni texto extra fuera del JSON.'
+      ].join(' ')
     },
     {
       role: 'user',
-      content:
-        `Esquema de la base de datos (propiedades):\n${schemaStr}\n\nContexto de la página:\n${contextStr}\n\nInstrucciones:\n- Rellena tantas propiedades como sea posible según el contexto.\n- Debe haber exactamente una propiedad de tipo "title" y debes establecer su valor con el mejor título posible.\n- Para propiedades de tipo select/multi_select, usa exclusivamente opciones existentes (coincidencia por nombre). Si no hay coincidencias claras, omite la propiedad.\n- Para dates, si no hay fecha específica en el contenido, puedes usar la fecha/hora actual.\n- Para url, establece la URL de la página si existe una propiedad apropiada.\n- Omite propiedades que no puedas determinar (no inventes valores).\n- NO incluyas propiedades de solo lectura (rollup, created_time, etc.).\n- Devuelve solo un objeto JSON con la forma { "properties": { ... } }.`
+      content: [
+        `Esquema de la base de datos (propiedades):\n${schemaStr}`,
+        `\nContexto de la página:\n${contextStr}`,
+        '\n\nInstrucciones:',
+        '- Rellena tantas propiedades como sea posible según el contexto.',
+        '- Debe haber exactamente una propiedad de tipo "title" y debes establecer su valor con el mejor título posible.',
+        '- Para propiedades de tipo select/multi_select, usa exclusivamente opciones existentes (coincidencia por nombre). Si no hay coincidencias claras, omite la propiedad.',
+        '- Para dates, si no hay fecha específica en el contenido, puedes usar la fecha/hora actual.',
+        '- Para url, establece la URL de la página si existe una propiedad apropiada.',
+        '- Omite propiedades que no puedas determinar (no inventes valores).',
+        '- NO incluyas propiedades de solo lectura (rollup, created_time, etc.).',
+        '- Opcionalmente, genera "children" con bloques de contenido breves y estructurados extraídos del contexto (p.ej., un resumen con headings y bullets).',
+        '- Devuelve SOLO un objeto JSON con la forma { "properties": { ... }, "children"?: [ ... ] }.'
+      ].join('\n')
     }
   ];
   if (customInstructions && typeof customInstructions === 'string' && customInstructions.trim().length > 0) {
@@ -199,6 +216,48 @@ function buildBookmarkBlocks(url, note) {
     });
   }
   return blocks;
+}
+
+// Normalize and sanitize LLM-provided blocks into a safe subset supported by Notion API
+function sanitizeBlocks(rawBlocks) {
+  if (!Array.isArray(rawBlocks)) return [];
+
+  function toRichText(text) {
+    const content = typeof text === 'string' ? text : '';
+    return [{ type: 'text', text: { content } }];
+  }
+
+  const allowedTypes = new Set([
+    'paragraph',
+    'heading_1',
+    'heading_2',
+    'heading_3',
+    'bulleted_list_item',
+    'numbered_list_item',
+    'quote',
+    'bookmark'
+  ]);
+
+  const out = [];
+  for (const b of rawBlocks) {
+    if (typeof b === 'string') {
+      out.push({ object: 'block', type: 'paragraph', paragraph: { rich_text: toRichText(b) } });
+      continue;
+    }
+    if (!b || typeof b !== 'object') continue;
+    const type = b.type;
+    if (!allowedTypes.has(type)) continue;
+    if (type === 'bookmark') {
+      const url = b?.bookmark?.url || b?.url || '';
+      if (!url) continue;
+      out.push({ object: 'block', type: 'bookmark', bookmark: { url } });
+      continue;
+    }
+    const field = b[type];
+    const txt = field?.rich_text || b.text || b.content || '';
+    out.push({ object: 'block', type, [type]: { rich_text: Array.isArray(txt) ? txt : toRichText(txt) } });
+  }
+  return out;
 }
 
 // Messaging handlers
@@ -317,8 +376,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
 
         const safeProps = sanitizeProperties(db, parsed.properties);
-
-        const blocks = buildBookmarkBlocks(pageContext.url, note);
+        let children = [];
+        if (parsed.children || parsed.blocks || parsed.content) {
+          children = sanitizeBlocks(parsed.children || parsed.blocks || parsed.content || []);
+        }
+        // Always add user note and bookmark at the top if provided
+        const addon = buildBookmarkBlocks(pageContext.url, note);
+        const blocks = addon.concat(children);
         const created = await createPageInDatabase(databaseId, safeProps, blocks);
         sendResponse({ ok: true, page: created });      } catch (e) {
         sendResponse({ ok: false, error: String(e.message || e) });
