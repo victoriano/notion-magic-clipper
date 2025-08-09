@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="es">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Opciones de la Extensión</title>
+    <title>Extension Options</title>
     <style>
       body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif; margin: 24px; max-width: 800px; }
       label { display: block; margin-top: 16px; font-weight: 600; }
@@ -19,25 +19,25 @@
     </style>
   </head>
   <body>
-    <h2>Opciones</h2>
-    <p>Configura tu conexión con Notion y OpenAI (GPT-5 Nano).</p>
+    <h2>Options</h2>
+    <p>Configure your connection with Notion and OpenAI (GPT-5 Nano).</p>
 
-    <label for="notionToken">Token de Integración de Notion</label>
+    <label for="notionToken">Notion Integration Token</label>
     <input id="notionToken" type="password" placeholder="secret_..." />
     <small>
-      Crea una <b>Integración interna</b> y copia su token: 
-      <a href="https://www.notion.so/my-integrations" target="_blank" rel="noreferrer">my-integrations</a>. 
-      Luego comparte las bases de datos con esa integración. 
-      Documentación: <a href="https://www.notion.com/help/create-integrations-with-the-notion-api" target="_blank" rel="noreferrer">Notion Help</a>.
+      Create an <b>Internal Integration</b> and copy its token: 
+      <a href="https://www.notion.so/my-integrations" target="_blank" rel="noreferrer">my-integrations</a>.
+      Then share your databases with that integration.
+      Docs: <a href="https://www.notion.com/help/create-integrations-with-the-notion-api" target="_blank" rel="noreferrer">Notion Help</a>.
     </small>
 
     <label for="openaiKey">OpenAI API Key</label>
     <input id="openaiKey" type="password" placeholder="sk-..." />
-    <small>Tu API key se guarda en el almacenamiento local de la extensión.</small>
+    <small>Your API key is stored in the extension's local storage.</small>
 
     <div class="row">
       <div class="col">
-        <label for="reasoning">Esfuerzo de razonamiento (GPT-5)</label>
+        <label for="reasoning">Reasoning effort (GPT-5)</label>
         <select id="reasoning">
           <option value="minimal">minimal</option>
           <option value="low" selected>low</option>
@@ -46,7 +46,7 @@
         </select>
       </div>
       <div class="col">
-        <label for="verbosity">Verbosidad (GPT-5)</label>
+        <label for="verbosity">Verbosity (GPT-5)</label>
         <select id="verbosity">
           <option value="low" selected>low</option>
           <option value="medium">medium</option>
@@ -55,21 +55,21 @@
       </div>
     </div>
 
-    <button id="saveBtn">Guardar opciones</button>
+    <button id="saveBtn">Save options</button>
     <div id="status"></div>
 
     <hr style="margin:24px 0"/>
-    <h3>Utilidades</h3>
+    <h3>Utilities</h3>
     <div>
-      <p>Listar bases de datos <b>sin título</b> para revisarlas en Notion.</p>
-      <button id="listUntitledBtn">Listar bases sin título</button>
+      <p>List <b>untitled</b> databases to review them in Notion.</p>
+      <button id="listUntitledBtn">List untitled databases</button>
       <div id="untitledStatus" style="margin-top:8px"></div>
       <ul id="untitledList"></ul>
       <hr style="margin:16px 0" />
-      <p>Listar <b>todas</b> las bases de datos accesibles con tu token.</p>
+      <p>List <b>all</b> databases accessible with your token.</p>
       <div class="row">
-        <input id="allDbQuery" placeholder="Filtrar por texto (opcional)" />
-        <button id="listAllBtn">Listar todas</button>
+        <input id="allDbQuery" placeholder="Filter by text (optional)" />
+        <button id="listAllBtn">List all</button>
       </div>
       <div id="allStatus" style="margin-top:8px"></div>
       <ul id="allList"></ul>

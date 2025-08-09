@@ -19,19 +19,19 @@ async function precheck() {
   const app = document.getElementById('app');
   const cfg = await getStorage(['notionToken', 'openaiKey']);
   if (!cfg.notionToken || !cfg.openaiKey) {
-    pre.innerHTML = `<div class="error">Faltan tokens. Configura tu <b>Token de Notion</b> y tu <b>OpenAI API key</b> en Opciones.</div>`;
+    pre.innerHTML = `<div class="error">Tokens missing. Set your <b>Notion Token</b> and <b>OpenAI API key</b> in Options.</div>`;
   } else {
-    pre.innerHTML = `<div class="success">Tokens configurados. Listo para guardar.</div>`;
+    pre.innerHTML = `<div class="success">Tokens configured. Ready to save.</div>`;
   }
   app.style.display = 'block';
 }
 
 async function listDatabases(query) {
   const status = document.getElementById('status');
-  status.textContent = 'Cargando bases de datos...';
+  status.textContent = 'Loading databases...';
   const res = await chrome.runtime.sendMessage({ type: 'LIST_DATABASES', query });
   if (!res?.ok) {
-    status.textContent = res?.error || 'Error al listar bases de datos';
+    status.textContent = res?.error || 'Error listing databases';
     return [];
   }
   status.textContent = '';
@@ -44,7 +44,7 @@ async function loadDatabases() {
   sel.innerHTML = '';
   const list = await listDatabases(search.value.trim());
   if (!list.length) {
-    sel.innerHTML = '<option>(No hay bases de datos compartidas con tu integración)</option>';
+    sel.innerHTML = '<option>(No databases are shared with your integration)</option>';
     sel.disabled = true;
     return;
   }
@@ -61,7 +61,7 @@ async function loadDatabases() {
 async function getPageContext(tabId) {
   try {
     const res = await chrome.tabs.sendMessage(tabId, { type: 'GET_PAGE_CONTEXT' });
-    if (!res?.ok) throw new Error(res?.error || 'No se pudo obtener el contexto de la página');
+    if (!res?.ok) throw new Error(res?.error || 'Could not get page context');
     return res.context;
   } catch (err) {
     const msg = String(err?.message || err || '');
@@ -70,7 +70,7 @@ async function getPageContext(tabId) {
     // Fallback: inject content script and retry
     await chrome.scripting.executeScript({ target: { tabId }, files: ['contentScript.js'] });
     const res2 = await chrome.tabs.sendMessage(tabId, { type: 'GET_PAGE_CONTEXT' });
-    if (!res2?.ok) throw new Error(res2?.error || 'No se pudo obtener el contexto tras inyectar el content script');
+    if (!res2?.ok) throw new Error(res2?.error || 'Could not get context after injecting content script');
     return res2.context;
   }
 }
@@ -92,7 +92,7 @@ async function save() {
     status.textContent = String(e.message || e);
     return;
   }
-  status.textContent = 'Analizando contenido con GPT-5 Nano y guardando en Notion...';
+  status.textContent = 'Analyzing content with GPT-5 Nano and saving to Notion...';
   const note = document.getElementById('note').value.trim();
   const res = await chrome.runtime.sendMessage({
     type: 'SAVE_TO_NOTION',
@@ -101,11 +101,11 @@ async function save() {
     note
   });
   if (!res?.ok) {
-    status.innerHTML = `<span class="error">${res?.error || 'Error al guardar'}</span>`;
+    status.innerHTML = `<span class="error">${res?.error || 'Error saving'}</span>`;
     return;
   }
   const pageUrl = res?.page?.url || res?.page?.public_url;
-  status.innerHTML = `<span class="success">Guardado correctamente ✅</span>` + (pageUrl ? `<div class="success-link"><a href="${pageUrl}" target="_blank" rel="noopener noreferrer">Abrir en Notion ↗</a></div>` : '');
+  status.innerHTML = `<span class="success">Saved successfully ✅</span>` + (pageUrl ? `<div class="success-link"><a href="${pageUrl}" target="_blank" rel="noopener noreferrer">Open in Notion ↗</a></div>` : '');
 }
 
 async function main() {

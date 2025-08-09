@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="es">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Guardar en Notion</title>
+    <title>Save to Notion</title>
     <style>
       body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif; margin: 12px; min-width: 300px; }
       .row { display: flex; gap: 8px; align-items: center; }
@@ -18,25 +18,25 @@
     </style>
   </head>
   <body>
-    <h3 style="margin-top:0">Guardar en Notion</h3>
+    <h3 style="margin-top:0">Save to Notion</h3>
     <div id="precheck"></div>
     <div id="app" style="display:none">
       <div class="row">
-        <input id="search" placeholder="Buscar bases de datos (opcional)" />
-        <button id="refresh" title="Refrescar">🔄</button>
+        <input id="search" placeholder="Search databases (optional)" />
+        <button id="refresh" title="Refresh">🔄</button>
       </div>
       <div class="row" style="margin-top:8px">
         <select id="databases"></select>
       </div>
       <div style="margin-top:8px">
-        <textarea id="note" placeholder="Nota opcional a incluir arriba del marcador"></textarea>
+        <textarea id="note" placeholder="Optional note to include above the bookmark"></textarea>
       </div>
       <div class="row" style="margin-top:8px">
-        <button id="save">Guardar en Notion</button>
+        <button id="save">Save to Notion</button>
       </div>
       <div id="status"></div>
       <div style="margin-top:10px">
-        <small>¿Tokens no configurados? Abre <span id="openOptions" class="link">Opciones</span>.</small>
+        <small>Tokens not configured? Open <span id="openOptions" class="link">Options</span>.</small>
       </div>
     </div>
     <script src="popup.js" type="module"></script>

@@ -22,25 +22,25 @@ async function save() {
   const openai_verbosity = document.getElementById('verbosity').value;
 
   await set({ notionToken, openaiKey, openai_reasoning_effort, openai_verbosity });
-  status.innerHTML = '<span class="success">Guardado ✓</span>';
+  status.innerHTML = '<span class="success">Saved ✓</span>';
 }
 
 async function listUntitled() {
   const status = document.getElementById('untitledStatus');
   const listEl = document.getElementById('untitledList');
-  status.textContent = 'Buscando bases de datos sin título...';
+  status.textContent = 'Searching untitled databases...';
   listEl.innerHTML = '';
   try {
     let items;
     try {
       const res = await chrome.runtime.sendMessage({ type: 'LIST_UNTITLED_DATABASES' });
-      if (!res?.ok) throw new Error(res?.error || 'Error al buscar (background)');
+      if (!res?.ok) throw new Error(res?.error || 'Search error (background)');
       items = res.databases || [];
     } catch (err) {
       // Fallback: query Notion directly from the Options page (avoids background lifetime issues)
       items = await searchUntitledDatabasesDirect();
     }
-    status.textContent = `Encontradas ${items.length} bases sin título`;
+    status.textContent = `Found ${items.length} untitled databases`;
     if (!items.length) return;
     for (const db of items) {
       const li = document.createElement('li');
@@ -62,13 +62,13 @@ async function listAllDatabasesFromOptions() {
   const listEl = document.getElementById('allList');
   const queryInput = document.getElementById('allDbQuery');
   const query = (queryInput?.value || '').trim();
-  status.textContent = 'Buscando todas las bases de datos...';
+  status.textContent = 'Fetching all databases...';
   listEl.innerHTML = '';
   try {
     let items;
     try {
       const res = await chrome.runtime.sendMessage({ type: 'LIST_ALL_DATABASES', query });
-      if (!res?.ok) throw new Error(res?.error || 'Error al listar (background)');
+      if (!res?.ok) throw new Error(res?.error || 'List error (background)');
       items = res.databases || [];
     } catch (err) {
       // Fallback: fetch directly from Options page
@@ -77,7 +77,7 @@ async function listAllDatabasesFromOptions() {
     // Sync prompts with current accessible databases (drop missing, add new as empty)
     const prompts = await syncPromptsWithDatabases(items);
 
-    status.textContent = `Encontradas ${items.length} bases`;
+    status.textContent = `Found ${items.length} databases`;
     renderAllDatabasesList(listEl, items, prompts);
   } catch (e) {
     status.textContent = String(e?.message || e);
@@ -90,7 +90,7 @@ const NOTION_VERSION = '2022-06-28';
 
 async function notionFetchFromOptions(path, options = {}) {
   const { notionToken } = await get(['notionToken']);
-  if (!notionToken) throw new Error('Falta el token de Notion. Configúralo y guarda los cambios.');
+  if (!notionToken) throw new Error('Missing Notion token. Configure it and save changes.');
   const headers = {
     Authorization: `Bearer ${notionToken}`,
     'Notion-Version': NOTION_VERSION,
@@ -118,7 +118,7 @@ async function searchAllDatabasesDirect(query = '') {
     const data = await notionFetchFromOptions('/search', { method: 'POST', body: JSON.stringify(body) });
     const results = Array.isArray(data.results) ? data.results : [];
     for (const item of results) {
-      const title = (item?.title || []).map((t) => t?.plain_text || '').join('') || '(Sin título)';
+      const title = (item?.title || []).map((t) => t?.plain_text || '').join('') || '(Untitled)';
       const url = item.url || `https://www.notion.so/${String(item.id || '').replace(/-/g, '')}`;
       const iconEmoji = item?.icon?.type === 'emoji' ? item.icon.emoji : undefined;
       all.push({ id: item.id, title, url, iconEmoji });
@@ -130,7 +130,7 @@ async function searchAllDatabasesDirect(query = '') {
 
 async function searchUntitledDatabasesDirect() {
   const all = await searchAllDatabasesDirect('');
-  return all.filter((d) => !d.title || d.title.trim().length === 0 || d.title === '(Sin título)');
+  return all.filter((d) => !d.title || d.title.trim().length === 0 || d.title === '(Untitled)');
 }
 
 // ---- Prompts storage helpers ----
@@ -166,12 +166,12 @@ function renderAllDatabasesList(container, items, prompts) {
     a.rel = 'noopener noreferrer';
     const hasPrompt = (prompts[db.id] || '').trim().length > 0;
     const badge = document.createElement('span');
-    badge.textContent = hasPrompt ? ' · prompt guardado' : '';
+    badge.textContent = hasPrompt ? ' · prompt saved' : '';
     badge.style.color = hasPrompt ? '#0b7a0b' : '#666';
     badge.style.fontSize = '12px';
 
     const editBtn = document.createElement('button');
-    editBtn.textContent = 'Editar prompt';
+    editBtn.textContent = 'Edit prompt';
     editBtn.style.marginLeft = '8px';
 
     top.appendChild(a);
@@ -185,16 +185,16 @@ function renderAllDatabasesList(container, items, prompts) {
     const ta = document.createElement('textarea');
     ta.rows = 4;
     ta.style.width = '100%';
-    ta.placeholder = 'Instrucciones personalizadas para esta base (cómo mapear, qué propiedades priorizar, etc.)';
+    ta.placeholder = 'Custom instructions for this database (how to map, which properties to prioritize, etc.)';
     ta.value = prompts[db.id] || '';
     const actions = document.createElement('div');
     const saveBtn = document.createElement('button');
-    saveBtn.textContent = 'Guardar';
+    saveBtn.textContent = 'Save';
     const clearBtn = document.createElement('button');
-    clearBtn.textContent = 'Borrar';
+    clearBtn.textContent = 'Clear';
     clearBtn.style.marginLeft = '8px';
     const closeBtn = document.createElement('button');
-    closeBtn.textContent = 'Cerrar';
+    closeBtn.textContent = 'Close';
     closeBtn.style.marginLeft = '8px';
     const mini = document.createElement('span');
     mini.style.marginLeft = '8px';
@@ -215,9 +215,9 @@ function renderAllDatabasesList(container, items, prompts) {
       const current = await getDatabasePrompts();
       current[db.id] = text;
       await setDatabasePrompts(current);
-      mini.textContent = 'Guardado ✓';
+      mini.textContent = 'Saved ✓';
       mini.style.color = '#0b7a0b';
-      badge.textContent = text ? ' · prompt guardado' : '';
+      badge.textContent = text ? ' · prompt saved' : '';
       badge.style.color = text ? '#0b7a0b' : '#666';
     });
     clearBtn.addEventListener('click', async () => {
@@ -225,7 +225,7 @@ function renderAllDatabasesList(container, items, prompts) {
       const current = await getDatabasePrompts();
       current[db.id] = '';
       await setDatabasePrompts(current);
-      mini.textContent = 'Borrado';
+      mini.textContent = 'Cleared';
       mini.style.color = '#666';
       badge.textContent = '';
     });

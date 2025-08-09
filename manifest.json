@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Guardar a Notion con GPT-5 Nano",
+  "name": "Save to Notion with GPT-5 Nano",
   "version": "0.1.0",
-  "description": "Guarda la página actual en una base de datos de Notion y usa GPT-5 Nano para completar propiedades automáticamente.",
+  "description": "Save the current page into a Notion database and use GPT-5 Nano to auto-complete properties.",
   "permissions": [
     "storage",
     "activeTab",
@@ -18,7 +18,7 @@
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Guardar en Notion"
+    "default_title": "Save to Notion"
   },
   "options_page": "options.html",
   "content_scripts": [
