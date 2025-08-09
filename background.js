@@ -86,6 +86,13 @@ async function createPageInDatabase(databaseId, properties, pageContentBlocks = 
   });
 }
 
+// Start a direct (single-part) file upload; returns { file_upload_id, upload_url }
+async function startFileUpload(filename) {
+  const body = { mode: 'single_part', filename: filename || 'upload.bin' };
+  const data = await notionFetch('/file_uploads', { method: 'POST', body: JSON.stringify(body) });
+  return { file_upload_id: data?.id, upload_url: data?.upload_url };
+}
+
 // Record a recent successful save for display in the popup history
 async function recordRecentSave(entry) {
   return new Promise((resolve) => {
@@ -250,7 +257,7 @@ function buildPromptForProperties(schema, pageContext, customInstructions) {
         'You are an assistant that generates both Notion PROPERTIES and CONTENT from a database schema and page context.',
         'Return only VALID JSON shaped as { "properties": { ... }, "children"?: [ ... ] }.',
         '- "properties": must use the exact Notion API structure and respect the provided schema types.',
-        '- "children" (optional): list of Notion blocks using ONLY: paragraph, heading_1, heading_2, heading_3, bulleted_list_item, numbered_list_item, quote, bookmark.',
+        '- "children" (optional): list of Notion blocks using ONLY: paragraph, heading_1, heading_2, heading_3, bulleted_list_item, numbered_list_item, quote, bookmark, image.',
         'Use simple rich_text with plain text in each block; do not include comments or text outside the JSON.'
       ].join(' ')
     },
@@ -263,6 +270,7 @@ function buildPromptForProperties(schema, pageContext, customInstructions) {
         '- Fill as many properties as possible based on the context.',
         '- There must be exactly one "title" property and you must set it to the best possible title.',
         '- For select/multi_select: use existing options by exact name. Do NOT create new options by default. Only propose new options if the custom database instructions explicitly allow creating options. If no clear match exists and creation is not allowed, omit the property.',
+        '- If a property name suggests an image (e.g., "Poster", "Cover", "Thumbnail", "Artwork", "Image", "Screenshot") and the page context contains an image URL (e.g., og:image or twitter:image), prefer filling that property with the image URL. If the database uses a files property, use the Notion files property shape with an external URL. Optionally, also add an image block to children using the same URL.',
         '- For dates, if no specific date is found in the content, you may use the current date/time.',
         '- For url, set the page URL if an appropriate property exists.',
         '- Omit properties you cannot determine (do not invent values).',
@@ -344,7 +352,9 @@ function sanitizeBlocks(rawBlocks) {
     'bulleted_list_item',
     'numbered_list_item',
     'quote',
-    'bookmark'
+    'bookmark',
+    'image',
+    'file'
   ]);
 
   const out = [];
@@ -360,6 +370,19 @@ function sanitizeBlocks(rawBlocks) {
       const url = b?.bookmark?.url || b?.url || '';
       if (!url) continue;
       out.push({ object: 'block', type: 'bookmark', bookmark: { url } });
+      continue;
+    }
+    if (type === 'image') {
+      const url = b?.image?.external?.url || b?.url;
+      const uploadId = b?.image?.file_upload?.file_upload_id || b?.file_upload_id;
+      if (typeof url === 'string' && url) {
+        out.push({ object: 'block', type: 'image', image: { external: { url } } });
+        continue;
+      }
+      if (typeof uploadId === 'string' && uploadId) {
+        out.push({ object: 'block', type: 'image', image: { file_upload: { file_upload_id: uploadId } } });
+        continue;
+      }
       continue;
     }
     const field = b[type];
@@ -436,6 +459,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (!notionToken) throw new Error('Falta el token de Notion. Configúralo en Opciones.');
         const list = await searchAllDatabases(notionToken, { query: message.query ?? notionSearchQuery ?? '' });
         sendResponse({ ok: true, databases: list });
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e.message || e) });
+      }
+      return;
+    }
+
+    if (message?.type === 'START_FILE_UPLOAD') {
+      try {
+        const { filename } = message || {};
+        const res = await startFileUpload(filename);
+        if (!res?.file_upload_id || !res?.upload_url) throw new Error('Failed to start file upload');
+        sendResponse({ ok: true, ...res });
       } catch (e) {
         sendResponse({ ok: false, error: String(e.message || e) });
       }
@@ -614,11 +649,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (parsed.children || parsed.blocks || parsed.content) {
           children = sanitizeBlocks(parsed.children || parsed.blocks || parsed.content || []);
         }
+        // Append uploaded images (from popup) as blocks
+        const attachmentBlocks = Array.isArray(message.attachments)
+          ? message.attachments
+              .filter((a) => typeof a?.file_upload_id === 'string')
+              .map((a) => ({ object: 'block', type: 'image', image: { file_upload: { file_upload_id: a.file_upload_id } } }))
+          : [];
         // Ensure select options exist (auto-create missing ones)
         await ensureSelectOptions(databaseId, safeProps);
         // Always add user note and bookmark at the top if provided
         const addon = buildBookmarkBlocks(pageContext.url, note);
-        const blocks = addon.concat(children);
+        const blocks = addon.concat(attachmentBlocks).concat(children);
         // Prefer the start time from the popup for end-to-end duration; fallback to now
         const t0 = typeof message.startedAt === 'number' ? message.startedAt : Date.now();
         const created = await createPageInDatabase(databaseId, safeProps, blocks);

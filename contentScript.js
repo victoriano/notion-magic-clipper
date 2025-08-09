@@ -9,7 +9,8 @@ function getMetaTag(name) {
 function collectPageContext() {
   const meta = {};
   const metaNames = [
-    'description', 'og:title', 'og:description', 'og:url', 'og:type', 'twitter:title', 'twitter:description', 'keywords'
+    'description', 'og:title', 'og:description', 'og:url', 'og:type',
+    'og:image', 'twitter:image', 'twitter:title', 'twitter:description', 'keywords'
   ];
   metaNames.forEach((n) => {
     const v = getMetaTag(n);
