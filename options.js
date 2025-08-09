@@ -25,5 +25,32 @@ async function save() {
   status.innerHTML = '<span class="success">Guardado ✓</span>';
 }
 
+async function listUntitled() {
+  const status = document.getElementById('untitledStatus');
+  const listEl = document.getElementById('untitledList');
+  status.textContent = 'Buscando bases de datos sin título...';
+  listEl.innerHTML = '';
+  try {
+    const res = await chrome.runtime.sendMessage({ type: 'LIST_UNTITLED_DATABASES' });
+    if (!res?.ok) throw new Error(res?.error || 'Error al buscar bases sin título');
+    const items = res.databases || [];
+    status.textContent = `Encontradas ${items.length} bases sin título`;
+    if (!items.length) return;
+    for (const db of items) {
+      const li = document.createElement('li');
+      const a = document.createElement('a');
+      a.href = db.url;
+      a.textContent = `${db.id}`;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      li.appendChild(a);
+      listEl.appendChild(li);
+    }
+  } catch (e) {
+    status.textContent = String(e?.message || e);
+  }
+}
+
 document.getElementById('saveBtn').addEventListener('click', save);
+document.getElementById('listUntitledBtn').addEventListener('click', listUntitled);
 load();

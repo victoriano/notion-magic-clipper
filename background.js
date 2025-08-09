@@ -1,5 +1,6 @@
 // background.js (service worker)
 // Handles Notion API and OpenAI API calls, and coordinates saving pages
+import { searchUntitledDatabases } from './utils/untitledDatabases.js';
 
 const NOTION_API_BASE = 'https://api.notion.com/v1';
 const NOTION_VERSION = '2022-06-28'; // latest per Notion docs
@@ -198,6 +199,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const { notionSearchQuery } = await getConfig();
         const bases = await listDatabases(message.query ?? notionSearchQuery ?? '');
         sendResponse({ ok: true, databases: bases });
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e.message || e) });
+      }
+      return;
+    }
+
+    if (message?.type === 'LIST_UNTITLED_DATABASES') {
+      try {
+        const { notionToken } = await getConfig();
+        if (!notionToken) throw new Error('Falta el token de Notion. Configúralo en Opciones.');
+        const list = await searchUntitledDatabases(notionToken);
+        sendResponse({ ok: true, databases: list });
       } catch (e) {
         sendResponse({ ok: false, error: String(e.message || e) });
       }
