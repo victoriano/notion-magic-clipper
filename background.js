@@ -86,6 +86,95 @@ async function createPageInDatabase(databaseId, properties, pageContentBlocks = 
   });
 }
 
+// Ensure select/multi_select options exist in the database schema; create missing ones
+async function ensureSelectOptions(databaseId, props) {
+  if (!props || typeof props !== 'object') return;
+  const db = await getDatabase(databaseId);
+  const updates = {};
+
+  function findExistingFallbackName(def) {
+    const options = (def.select?.options || def.multi_select?.options || []).map((o) => o.name);
+    const preferred = ['Other', 'Misc', 'Uncategorized', 'General', 'Unknown'];
+    for (const p of preferred) {
+      if (options.some((n) => String(n).toLowerCase() === p.toLowerCase())) return p;
+    }
+    return undefined;
+  }
+
+  for (const [propName, def] of Object.entries(db.properties || {})) {
+    const incoming = props[propName];
+    if (!incoming) continue;
+    if (def.type === 'select' && incoming.select?.name) {
+      const existingOpts = def.select?.options || [];
+      const existingNames = new Set(existingOpts.map((o) => o.name));
+      const desired = String(incoming.select.name).trim();
+      if (!existingNames.has(desired)) {
+        const capacity = Math.max(0, 100 - existingOpts.length);
+        if (capacity > 0) {
+          const color = 'default';
+          updates[propName] = existingOpts.concat([{ name: desired, color }]);
+        } else {
+          // No capacity: fallback to an existing option or drop the property
+          const fallback = findExistingFallbackName(def) || existingOpts[0]?.name;
+          if (fallback) {
+            incoming.select.name = fallback;
+          } else {
+            delete props[propName];
+          }
+        }
+      }
+    }
+    if (def.type === 'multi_select' && Array.isArray(incoming.multi_select)) {
+      const existingOpts = def.multi_select?.options || [];
+      const existingNames = new Set(existingOpts.map((o) => o.name));
+      const desiredNames = incoming.multi_select.map((o) => o.name).filter((n) => typeof n === 'string' && n.trim().length > 0).map((n) => n.trim());
+      const missing = desiredNames.filter((n) => !existingNames.has(n));
+
+      const capacity = Math.max(0, 100 - existingOpts.length);
+      const toAdd = missing.slice(0, capacity);
+      const leftover = missing.slice(toAdd.length);
+
+      // Filter incoming values to those that either exist or will be added
+      const allowed = new Set([...desiredNames.filter((n) => existingNames.has(n)), ...toAdd]);
+      let filtered = desiredNames.filter((n) => allowed.has(n));
+
+      // If some leftover couldn't be added, optionally map to a fallback existing option
+      if (leftover.length > 0) {
+        const fallback = findExistingFallbackName(def);
+        if (fallback && !filtered.includes(fallback)) {
+          filtered.push(fallback);
+        }
+      }
+      // Remove duplicates while preserving order
+      const seen = new Set();
+      filtered = filtered.filter((n) => (seen.has(n) ? false : (seen.add(n), true)));
+      incoming.multi_select = filtered.map((n) => ({ name: n }));
+
+      if (toAdd.length > 0) {
+        const color = 'default';
+        updates[propName] = existingOpts.concat(toAdd.map((n) => ({ name: n, color })));
+      }
+    }
+  }
+
+  const payload = {};
+  for (const [propName, optList] of Object.entries(updates)) {
+    const propDef = db.properties[propName];
+    if (propDef.type === 'select') {
+      payload[propName] = { select: { options: optList } };
+    } else if (propDef.type === 'multi_select') {
+      payload[propName] = { multi_select: { options: optList } };
+    }
+  }
+
+  if (Object.keys(payload).length > 0) {
+    await notionFetch(`/databases/${databaseId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ properties: payload })
+    });
+  }
+}
+
 // OpenAI API helper
 async function openaiChat(messages, { model = GPT5_NANO_MODEL, temperature = 0.2, reasoning_effort = 'low', verbosity = 'low' } = {}) {
   const { openaiKey } = await getConfig();
@@ -153,7 +242,7 @@ function buildPromptForProperties(schema, pageContext, customInstructions) {
         '\n\nInstrucciones:',
         '- Rellena tantas propiedades como sea posible según el contexto.',
         '- Debe haber exactamente una propiedad de tipo "title" y debes establecer su valor con el mejor título posible.',
-        '- Para propiedades de tipo select/multi_select, usa exclusivamente opciones existentes (coincidencia por nombre). Si no hay coincidencias claras, omite la propiedad.',
+         '- Para propiedades de tipo select/multi_select, usa opciones existentes cuando coincidan por nombre; si no hay coincidencia clara, propone un nombre de opción nuevo y úsalo. La aplicación creará la opción si no existe.',
         '- Para dates, si no hay fecha específica en el contenido, puedes usar la fecha/hora actual.',
         '- Para url, establece la URL de la página si existe una propiedad apropiada.',
         '- Omite propiedades que no puedas determinar (no inventes valores).',
@@ -260,6 +349,41 @@ function sanitizeBlocks(rawBlocks) {
   return out;
 }
 
+// Extract the first valid JSON object from a free-form string.
+function extractJsonObject(text) {
+  if (!text || typeof text !== 'string') return null;
+  // Strip code fences if present
+  const fenceMatch = text.match(/```(?:json)?\n([\s\S]*?)\n```/i);
+  const candidate = fenceMatch ? fenceMatch[1] : text;
+  // Fast path
+  try { if (candidate.trim().startsWith('{')) return JSON.parse(candidate); } catch (_) {}
+  // Walk to find the first balanced {...}
+  const s = candidate;
+  let start = -1, depth = 0, inStr = false, esc = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inStr) {
+      if (esc) { esc = false; continue; }
+      if (ch === '\\') { esc = true; continue; }
+      if (ch === '"') { inStr = false; }
+      continue;
+    }
+    if (ch === '"') { inStr = true; continue; }
+    if (ch === '{') { if (depth === 0) start = i; depth++; continue; }
+    if (ch === '}') { depth--; if (depth === 0 && start >= 0) {
+      const frag = s.slice(start, i + 1);
+      try {
+        return JSON.parse(frag);
+      } catch (_) {
+        // Try to remove trailing commas
+        const fixed = frag.replace(/,\s*(\]|\})/g, '$1');
+        try { return JSON.parse(fixed); } catch (_) { return null; }
+      }
+    }}
+  }
+  return null;
+}
+
 // Messaging handlers
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
@@ -316,14 +440,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           verbosity: openai_verbosity || 'low'
         });
 
-        // Parse JSON block from content
-        let parsed;
-        try {
-          // Try to find a JSON object in the string
-          const match = content.match(/\{[\s\S]*\}/);
-          parsed = match ? JSON.parse(match[0]) : JSON.parse(content);
-        } catch (err) {
-          throw new Error('El modelo no devolvió JSON válido para propiedades.');
+        // Parse JSON block from content (robust extractor)
+        const parsed = extractJsonObject(content);
+        if (!parsed) {
+          throw new Error('The model did not return valid JSON for properties.');
         }
 
         if (!parsed || typeof parsed !== 'object' || !parsed.properties) {
@@ -391,12 +511,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               }
               case 'select': {
                 const name = typeof value === 'string' ? value : value?.select?.name ?? value?.name;
-                if (typeof name === 'string' && name.length > 0) return { select: { name } };
+                if (typeof name === 'string' && name.trim().length > 0) return { select: { name: name.trim() } };
                 return undefined;
               }
               case 'multi_select': {
                 const arr = Array.isArray(value) ? value : (Array.isArray(value?.multi_select) ? value.multi_select : (typeof value === 'string' ? value.split(',') : undefined));
-                if (Array.isArray(arr)) return { multi_select: arr.map((v) => ({ name: typeof v === 'string' ? v.trim() : v?.name }).filter(Boolean)) };
+                if (Array.isArray(arr)) {
+                  const cleaned = arr
+                    .map((v) => (typeof v === 'string' ? v.trim() : v?.name))
+                    .filter((n) => typeof n === 'string' && n.length > 0)
+                    .map((name) => ({ name }));
+                  if (cleaned.length > 0) return { multi_select: cleaned };
+                }
                 return undefined;
               }
               case 'status': {
@@ -468,6 +594,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (parsed.children || parsed.blocks || parsed.content) {
           children = sanitizeBlocks(parsed.children || parsed.blocks || parsed.content || []);
         }
+        // Ensure select options exist (auto-create missing ones)
+        await ensureSelectOptions(databaseId, safeProps);
         // Always add user note and bookmark at the top if provided
         const addon = buildBookmarkBlocks(pageContext.url, note);
         const blocks = addon.concat(children);
