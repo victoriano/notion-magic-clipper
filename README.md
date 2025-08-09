@@ -1,5 +1,11 @@
 # Notion Magic Clipper
 
+<p align="center">
+  <img src="notion_magic_clipper_logo.png" alt="Notion Magic Clipper logo" width="220" />
+  <br/>
+  <em>Clip the web to Notion with a bit of magic ✨</em>
+</p>
+
 A Chrome (MV3) extension that sends the current page to a Notion database and uses GPT‑5 Nano to auto-complete properties and optionally generate page content.
 
 - Fast “clip to Notion” with per‑database custom prompts
