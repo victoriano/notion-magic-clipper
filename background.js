@@ -227,35 +227,35 @@ function buildPromptForProperties(schema, pageContext, customInstructions) {
     {
       role: 'system',
       content: [
-        'Eres un asistente que genera tanto PROPIEDADES como CONTENIDO de Notion dados un esquema de base de datos y el contexto de una página web.',
-        'Devuelve únicamente JSON VÁLIDO con la forma { "properties": { ... }, "children"?: [ ... ] }.',
-        '- "properties": exactamente en el formato de la API de Notion para crear páginas, validando tipos del esquema.',
-        '- "children" (opcional): lista de bloques de Notion para el contenido, usando SOLO: paragraph, heading_1, heading_2, heading_3, bulleted_list_item, numbered_list_item, quote, bookmark.',
-        'Usa rich_text simples con texto en cada bloque; no incluyas comentarios ni texto extra fuera del JSON.'
+        'You are an assistant that generates both Notion PROPERTIES and CONTENT from a database schema and page context.',
+        'Return only VALID JSON shaped as { "properties": { ... }, "children"?: [ ... ] }.',
+        '- "properties": must use the exact Notion API structure and respect the provided schema types.',
+        '- "children" (optional): list of Notion blocks using ONLY: paragraph, heading_1, heading_2, heading_3, bulleted_list_item, numbered_list_item, quote, bookmark.',
+        'Use simple rich_text with plain text in each block; do not include comments or text outside the JSON.'
       ].join(' ')
     },
     {
       role: 'user',
       content: [
-        `Esquema de la base de datos (propiedades):\n${schemaStr}`,
-        `\nContexto de la página:\n${contextStr}`,
-        '\n\nInstrucciones:',
-        '- Rellena tantas propiedades como sea posible según el contexto.',
-        '- Debe haber exactamente una propiedad de tipo "title" y debes establecer su valor con el mejor título posible.',
-         '- Para propiedades de tipo select/multi_select, usa opciones existentes cuando coincidan por nombre; si no hay coincidencia clara, propone un nombre de opción nuevo y úsalo. La aplicación creará la opción si no existe.',
-        '- Para dates, si no hay fecha específica en el contenido, puedes usar la fecha/hora actual.',
-        '- Para url, establece la URL de la página si existe una propiedad apropiada.',
-        '- Omite propiedades que no puedas determinar (no inventes valores).',
-        '- NO incluyas propiedades de solo lectura (rollup, created_time, etc.).',
-        '- Opcionalmente, genera "children" con bloques de contenido breves y estructurados extraídos del contexto (p.ej., un resumen con headings y bullets).',
-        '- Devuelve SOLO un objeto JSON con la forma { "properties": { ... }, "children"?: [ ... ] }.'
+        `Database schema (properties):\n${schemaStr}`,
+        `\nPage context:\n${contextStr}`,
+        '\n\nInstructions:',
+        '- Fill as many properties as possible based on the context.',
+        '- There must be exactly one "title" property and you must set it to the best possible title.',
+        '- For select/multi_select: use existing options by exact name. Do NOT create new options by default. Only propose new options if the custom database instructions explicitly allow creating options. If no clear match exists and creation is not allowed, omit the property.',
+        '- For dates, if no specific date is found in the content, you may use the current date/time.',
+        '- For url, set the page URL if an appropriate property exists.',
+        '- Omit properties you cannot determine (do not invent values).',
+        '- Do NOT include read-only properties (rollup, created_time, etc.).',
+        '- Optionally, generate "children" with brief structured blocks extracted from the context (e.g., headings and bullets).',
+        '- Return ONLY one JSON object shaped as { "properties": { ... }, "children"?: [ ... ] }.'
       ].join('\n')
     }
   ];
   if (customInstructions && typeof customInstructions === 'string' && customInstructions.trim().length > 0) {
     messages.push({
       role: 'user',
-      content: `Instrucciones personalizadas específicas para esta base de datos:\n${customInstructions.trim()}`
+      content: `Custom instructions specific to this database:\n${customInstructions.trim()}`
     });
   }
   return messages;
