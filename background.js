@@ -1,6 +1,7 @@
 // background.js (service worker)
 // Handles Notion API and OpenAI API calls, and coordinates saving pages
 import { searchUntitledDatabases } from './utils/untitledDatabases.js';
+import { searchAllDatabases } from './utils/listAllDatabases.js';
 
 const NOTION_API_BASE = 'https://api.notion.com/v1';
 const NOTION_VERSION = '2022-06-28'; // latest per Notion docs
@@ -217,6 +218,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return;
     }
 
+    if (message?.type === 'LIST_ALL_DATABASES') {
+      try {
+        const { notionToken, notionSearchQuery } = await getConfig();
+        if (!notionToken) throw new Error('Falta el token de Notion. Configúralo en Opciones.');
+        const list = await searchAllDatabases(notionToken, { query: message.query ?? notionSearchQuery ?? '' });
+        sendResponse({ ok: true, databases: list });
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e.message || e) });
+      }
+      return;
+    }
+
     if (message?.type === 'SAVE_TO_NOTION') {
       try {
         const { databaseId, pageContext, note } = message;
@@ -302,6 +315,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       return;
     }
+    // If we got here, no known message type matched. Respond to avoid channel timeout.
+    try {
+      sendResponse({ ok: false, error: `Tipo de mensaje no reconocido: ${message?.type || 'desconocido'}` });
+    } catch (_) {}
   })();
   // Indicate async response
   return true;
