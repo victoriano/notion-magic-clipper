@@ -122,6 +122,76 @@ async function startFileUpload(filename) {
   return { file_upload_id: data?.id, upload_url: data?.upload_url };
 }
 
+async function uploadExternalImageToNotion(imageUrl) {
+  try {
+    const urlObj = new URL(imageUrl, location.href);
+    const pathname = urlObj.pathname || '';
+    const base = pathname.split('/').pop() || 'image';
+    const guessedName = base.includes('.') ? base : base + '.png';
+    dbgBg('UPLOAD: fetching external image', imageUrl);
+    const resp = await fetch(imageUrl, { mode: 'cors' });
+    if (!resp.ok) throw new Error(`fetch ${resp.status}`);
+    const blob = await resp.blob();
+    // Guard: 20MB single-part limit (approx)
+    if (blob.size > 20 * 1024 * 1024) throw new Error('image too large (>20MB)');
+    const { file_upload_id, upload_url } = await startFileUpload(guessedName);
+    dbgBg('UPLOAD: started', { file_upload_id });
+    const fd = new FormData();
+    const file = new File([blob], guessedName, { type: blob.type || 'application/octet-stream' });
+    fd.append('file', file);
+    const up = await fetch(upload_url, { method: 'POST', body: fd });
+    if (!up.ok) throw new Error(`upload ${up.status}`);
+    dbgBg('UPLOAD: completed', { file_upload_id });
+    return { file_upload_id };
+  } catch (e) {
+    dbgBg('UPLOAD: failed', { imageUrl, error: String(e?.message || e) });
+    return null;
+  }
+}
+
+async function materializeExternalImagesInPropsAndBlocks(db, props, blocks, { maxUploads = 6 } = {}) {
+  let uploads = 0;
+  const tryUpload = async (url) => {
+    if (uploads >= maxUploads) return null;
+    const res = await uploadExternalImageToNotion(url);
+    if (res && res.file_upload_id) uploads += 1;
+    return res;
+  };
+
+  // Convert files properties
+  for (const [propName, def] of Object.entries(db.properties || {})) {
+    if (def.type !== 'files') continue;
+    const v = props[propName];
+    const items = v?.files;
+    if (!Array.isArray(items) || !items.length) continue;
+    const out = [];
+    for (const it of items) {
+      if (it?.file_upload?.file_upload_id) { out.push(it); continue; }
+      const ext = it?.external?.url || it?.url;
+      if (typeof ext === 'string') {
+        const up = await tryUpload(ext);
+        if (up) { out.push({ name: it?.name || 'image', file_upload: { file_upload_id: up.file_upload_id } }); continue; }
+      }
+      // Fallback – ensure name and external structure
+      if (it?.external?.url) out.push({ name: it?.name || 'image', external: { url: it.external.url } });
+      else if (it?.url) out.push({ name: 'image', external: { url: it.url } });
+    }
+    props[propName] = { files: out };
+  }
+
+  // Convert image blocks
+  for (const b of blocks) {
+    if (!b || b.type !== 'image') continue;
+    const ext = b.image?.external?.url || b.url;
+    if (typeof ext === 'string') {
+      const up = await tryUpload(ext);
+      if (up) {
+        b.image = { file_upload: { file_upload_id: up.file_upload_id } };
+      }
+    }
+  }
+}
+
 // Record a recent successful save for display in the popup history
 async function recordRecentSave(entry) {
   return new Promise((resolve) => {
@@ -559,6 +629,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return [{ type: 'text', text: { content } }];
           }
 
+          function guessNameFromUrl(u, fallback = 'file') {
+            try {
+              const url = new URL(u);
+              const base = url.pathname.split('/').pop();
+              if (base && base !== '/') return base;
+            } catch {}
+            return fallback;
+          }
+
           function normalizeValueByType(def, value) {
             const type = def.type;
             if (value == null) return undefined;
@@ -581,6 +660,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 const url = typeof value === 'string' ? value : value?.url;
                 if (typeof url === 'string' && url.length > 0) return { url };
                 return undefined;
+              }
+              case 'files': {
+                // Accept arrays of strings (external URLs) or file/external/file_upload objects
+                const arr = Array.isArray(value) ? value : (Array.isArray(value?.files) ? value.files : undefined);
+                if (!Array.isArray(arr)) return undefined;
+                const files = [];
+                for (const item of arr) {
+                  if (!item) continue;
+                  if (typeof item === 'string') {
+                    files.push({ name: guessNameFromUrl(item, 'image'), external: { url: item } });
+                    continue;
+                  }
+                  if (typeof item?.url === 'string') {
+                    files.push({ name: guessNameFromUrl(item.url, item.name || 'image'), external: { url: item.url } });
+                    continue;
+                  }
+                  if (item.external?.url) {
+                    files.push({ name: item.name || guessNameFromUrl(item.external.url, 'image'), external: { url: item.external.url } });
+                    continue;
+                  }
+                  if (item.file_upload?.file_upload_id) {
+                    files.push({ name: item.name || 'image', file_upload: { file_upload_id: item.file_upload.file_upload_id } });
+                    continue;
+                  }
+                }
+                return files.length ? { files } : undefined;
               }
               case 'email': {
                 const email = typeof value === 'string' ? value : value?.email;
@@ -695,12 +800,35 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               .filter((a) => typeof a?.file_upload_id === 'string')
               .map((a) => ({ object: 'block', type: 'image', image: { file_upload: { file_upload_id: a.file_upload_id } } }))
           : [];
+        // Also try to map attachments into an image-like files property if present
+        if (Array.isArray(message.attachments) && message.attachments.length) {
+          const imageLike = /poster|cover|thumb|thumbnail|image|artwork|screenshot|photo|picture/i;
+          const filesPropName = Object.entries(db.properties || {})
+            .filter(([, def]) => def.type === 'files')
+            .map(([name]) => name)
+            .sort((a, b) => {
+              const ai = imageLike.test(a) ? 0 : 1;
+              const bi = imageLike.test(b) ? 0 : 1;
+              return ai - bi;
+            })[0];
+          if (filesPropName) {
+            const uploads = message.attachments
+              .filter((a) => typeof a?.file_upload_id === 'string')
+              .map((a) => ({ name: 'upload', file_upload: { file_upload_id: a.file_upload_id } }));
+            if (uploads.length) {
+              const existing = safeProps[filesPropName]?.files || parsed.properties?.[filesPropName]?.files || [];
+              safeProps[filesPropName] = { files: existing.concat(uploads) };
+            }
+          }
+        }
         // Ensure select options exist (auto-create missing ones)
         await ensureSelectOptions(databaseId, safeProps);
         dbgBg('SAVE_TO_NOTION: ensured select options (props sent to check)', sanitizeForLog(safeProps));
         // Always add user note and bookmark at the top if provided
         const addon = buildBookmarkBlocks(pageContext.url, note);
         const blocks = addon.concat(attachmentBlocks).concat(children);
+        // Materialize external image URLs into Notion-hosted uploads (both blocks and files properties)
+        await materializeExternalImagesInPropsAndBlocks(db, safeProps, blocks, { maxUploads: 6 });
         // Prefer the start time from the popup for end-to-end duration; fallback to now
         const t0 = typeof message.startedAt === 'number' ? message.startedAt : Date.now();
         dbgBg('SAVE_TO_NOTION: creating page in Notion with', { properties: sanitizeForLog(safeProps), children: sanitizeForLog(blocks) });
