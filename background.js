@@ -119,32 +119,120 @@ async function createPageInDatabase(databaseId, properties, pageContentBlocks = 
 async function startFileUpload(filename) {
   const body = { mode: 'single_part', filename: filename || 'upload.bin' };
   const data = await notionFetch('/file_uploads', { method: 'POST', body: JSON.stringify(body) });
-  return { file_upload_id: data?.id, upload_url: data?.upload_url };
+  // Return as much as possible to support different upload styles (PUT vs POST form)
+  return {
+    id: data?.id,
+    file_upload_id: data?.id,
+    upload_url: data?.upload_url || data?.url,
+    upload_headers: data?.upload_headers || data?.headers,
+    upload_fields: data?.upload_fields || data?.fields || data?.form || data?.form_fields
+  };
+}
+
+function normalizeExternalImageUrl(raw) {
+  try {
+    const u = new URL(raw, location.href);
+    if ((u.hostname === 'www.notion.so' || u.hostname.endsWith('.notion.so')) && u.pathname.startsWith('/image/')) {
+      const qp = u.searchParams.get('url');
+      if (qp) return decodeURIComponent(qp);
+      const enc = u.pathname.replace(/^\/image\//, '');
+      if (enc) return decodeURIComponent(enc);
+    }
+    return u.href;
+  } catch {
+    return raw;
+  }
+}
+
+function redactUrl(u) {
+  try {
+    const x = new URL(u);
+    x.search = '';
+    return x.href;
+  } catch {
+    return String(u).split('?')[0];
+  }
 }
 
 async function uploadExternalImageToNotion(imageUrl) {
   try {
-    const urlObj = new URL(imageUrl, location.href);
+    const normalized = normalizeExternalImageUrl(imageUrl);
+    const urlObj = new URL(normalized, location.href);
     const pathname = urlObj.pathname || '';
     const base = pathname.split('/').pop() || 'image';
     const guessedName = base.includes('.') ? base : base + '.png';
-    dbgBg('UPLOAD: fetching external image', imageUrl);
-    const resp = await fetch(imageUrl, { mode: 'cors' });
+    dbgBg('UPLOAD: fetching external image', { original: redactUrl(imageUrl), normalized: redactUrl(normalized) });
+    const resp = await fetch(normalized, { mode: 'cors' });
     if (!resp.ok) throw new Error(`fetch ${resp.status}`);
     const blob = await resp.blob();
     // Guard: 20MB single-part limit (approx)
     if (blob.size > 20 * 1024 * 1024) throw new Error('image too large (>20MB)');
-    const { file_upload_id, upload_url } = await startFileUpload(guessedName);
-    dbgBg('UPLOAD: started', { file_upload_id });
-    const fd = new FormData();
-    const file = new File([blob], guessedName, { type: blob.type || 'application/octet-stream' });
-    fd.append('file', file);
-    const up = await fetch(upload_url, { method: 'POST', body: fd });
-    if (!up.ok) throw new Error(`upload ${up.status}`);
+    const { file_upload_id, upload_url, upload_headers, upload_fields } = await startFileUpload(guessedName);
+    dbgBg('UPLOAD: started', {
+      file_upload_id,
+      upload_url: redactUrl(upload_url),
+      upload_headers: upload_headers ? Object.keys(upload_headers) : [],
+      upload_fields: upload_fields ? Object.keys(upload_fields) : []
+    });
+    let up;
+    if (upload_fields && typeof upload_fields === 'object') {
+      // S3 POST policy style: we must include provided fields before the file
+      const fd = new FormData();
+      for (const [k, v] of Object.entries(upload_fields)) fd.append(k, v);
+      const file = new File([blob], guessedName, { type: blob.type || 'application/octet-stream' });
+      fd.append('file', file);
+      const postHeaders = {};
+      if (upload_headers && typeof upload_headers === 'object') {
+        for (const [k, v] of Object.entries(upload_headers)) postHeaders[k] = v;
+      }
+      up = await fetch(upload_url, { method: 'POST', headers: postHeaders, body: fd });
+      if (!up.ok) {
+        const body = await up.text().catch(() => '');
+        throw new Error(`upload ${up.status} POST-policy; body=${body.slice(0,300)}`);
+      }
+    } else {
+      // Decide between Notion POST endpoint vs signed PUT URL
+      let targetHost = '';
+      try { targetHost = new URL(upload_url).hostname; } catch {}
+      if (targetHost.endsWith('notion.com')) {
+        // Notion expects multipart/form-data POST with 'file'
+        const fd = new FormData();
+        const file = new File([blob], guessedName, { type: blob.type || 'application/octet-stream' });
+        fd.append('file', file);
+        const postHeaders = {};
+        if (upload_headers && typeof upload_headers === 'object') {
+          for (const [k, v] of Object.entries(upload_headers)) postHeaders[k] = v;
+        }
+        // Notion upload endpoint requires auth/version even if not listed in upload_headers
+        try {
+          const { notionToken } = await getConfig();
+          if (notionToken) {
+            postHeaders['Authorization'] = `Bearer ${notionToken}`;
+            postHeaders['Notion-Version'] = NOTION_VERSION;
+          }
+        } catch {}
+        up = await fetch(upload_url, { method: 'POST', headers: postHeaders, body: fd });
+        if (!up.ok) {
+          const body = await up.text().catch(() => '');
+          throw new Error(`upload ${up.status} POST-notion; body=${body.slice(0,300)}`);
+        }
+      } else {
+        // Signed URL (PUT) style
+        const headers = { 'Content-Type': blob.type || 'application/octet-stream' };
+        if (upload_headers && typeof upload_headers === 'object') {
+          for (const [k, v] of Object.entries(upload_headers)) headers[k] = v;
+        }
+        up = await fetch(upload_url, { method: 'PUT', headers, body: blob });
+        if (!up.ok) {
+          const body = await up.text().catch(() => '');
+          throw new Error(`upload ${up.status} PUT; body=${body.slice(0,300)}`);
+        }
+      }
+    }
     dbgBg('UPLOAD: completed', { file_upload_id });
-    return { file_upload_id };
+    return { file_upload_id, id: file_upload_id };
   } catch (e) {
-    dbgBg('UPLOAD: failed', { imageUrl, error: String(e?.message || e) });
+    dbgBg('UPLOAD: failed', { imageUrl: redactUrl(imageUrl), error: String(e?.message || e) });
     return null;
   }
 }
@@ -154,7 +242,7 @@ async function materializeExternalImagesInPropsAndBlocks(db, props, blocks, { ma
   const tryUpload = async (url) => {
     if (uploads >= maxUploads) return null;
     const res = await uploadExternalImageToNotion(url);
-    if (res && res.file_upload_id) uploads += 1;
+    if (res && (res.file_upload_id || res.id)) uploads += 1;
     return res;
   };
 
@@ -166,11 +254,15 @@ async function materializeExternalImagesInPropsAndBlocks(db, props, blocks, { ma
     if (!Array.isArray(items) || !items.length) continue;
     const out = [];
     for (const it of items) {
-      if (it?.file_upload?.file_upload_id) { out.push(it); continue; }
+      if (it?.file_upload?.file_upload_id || it?.file_upload?.id) { out.push(it); continue; }
       const ext = it?.external?.url || it?.url;
       if (typeof ext === 'string') {
         const up = await tryUpload(ext);
-        if (up) { out.push({ name: it?.name || 'image', file_upload: { file_upload_id: up.file_upload_id } }); continue; }
+        if (up) {
+          const fid = up.file_upload_id || up.id;
+          out.push({ name: it?.name || 'image', file_upload: { id: fid } });
+          continue;
+        }
       }
       // Fallback – ensure name and external structure
       if (it?.external?.url) out.push({ name: it?.name || 'image', external: { url: it.external.url } });
@@ -182,11 +274,12 @@ async function materializeExternalImagesInPropsAndBlocks(db, props, blocks, { ma
   // Convert image blocks
   for (const b of blocks) {
     if (!b || b.type !== 'image') continue;
-    const ext = b.image?.external?.url || b.url;
+      const ext = b.image?.external?.url || b.url;
     if (typeof ext === 'string') {
       const up = await tryUpload(ext);
       if (up) {
-        b.image = { file_upload: { file_upload_id: up.file_upload_id } };
+        const fid = up.file_upload_id || up.id;
+        b.image = { file_upload: { id: fid, file_upload_id: fid } };
       }
     }
   }
@@ -435,6 +528,19 @@ function buildBookmarkBlocks(url, note) {
   return blocks;
 }
 
+function stripForbiddenFieldsFromBlocks(blocks) {
+  if (!Array.isArray(blocks)) return;
+  for (const b of blocks) {
+    if (!b || typeof b !== 'object') continue;
+    if (b.type === 'image' || b.type === 'file') {
+      const container = b[b.type];
+      if (container && container.file_upload && typeof container.file_upload === 'object') {
+        if ('file_upload_id' in container.file_upload) delete container.file_upload.file_upload_id;
+      }
+    }
+  }
+}
+
 // Normalize and sanitize LLM-provided blocks into a safe subset supported by Notion API
 function sanitizeBlocks(rawBlocks) {
   if (!Array.isArray(rawBlocks)) return [];
@@ -480,7 +586,7 @@ function sanitizeBlocks(rawBlocks) {
         continue;
       }
       if (typeof uploadId === 'string' && uploadId) {
-        out.push({ object: 'block', type: 'image', image: { file_upload: { file_upload_id: uploadId } } });
+        out.push({ object: 'block', type: 'image', image: { file_upload: { id: uploadId } } });
         continue;
       }
       continue;
@@ -798,7 +904,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const attachmentBlocks = Array.isArray(message.attachments)
           ? message.attachments
               .filter((a) => typeof a?.file_upload_id === 'string')
-              .map((a) => ({ object: 'block', type: 'image', image: { file_upload: { file_upload_id: a.file_upload_id } } }))
+              .map((a) => ({ object: 'block', type: 'image', image: { file_upload: { id: (a.file_upload_id || a.id) } } }))
           : [];
         // Also try to map attachments into an image-like files property if present
         if (Array.isArray(message.attachments) && message.attachments.length) {
@@ -814,7 +920,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           if (filesPropName) {
             const uploads = message.attachments
               .filter((a) => typeof a?.file_upload_id === 'string')
-              .map((a) => ({ name: 'upload', file_upload: { file_upload_id: a.file_upload_id } }));
+              .map((a) => ({ name: 'upload', file_upload: { id: (a.file_upload_id || a.id) } }));
             if (uploads.length) {
               const existing = safeProps[filesPropName]?.files || parsed.properties?.[filesPropName]?.files || [];
               safeProps[filesPropName] = { files: existing.concat(uploads) };
@@ -829,6 +935,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const blocks = addon.concat(attachmentBlocks).concat(children);
         // Materialize external image URLs into Notion-hosted uploads (both blocks and files properties)
         await materializeExternalImagesInPropsAndBlocks(db, safeProps, blocks, { maxUploads: 6 });
+        // Ensure we do not send forbidden fields to Notion (e.g., file_upload.file_upload_id in blocks)
+        stripForbiddenFieldsFromBlocks(blocks);
         // Prefer the start time from the popup for end-to-end duration; fallback to now
         const t0 = typeof message.startedAt === 'number' ? message.startedAt : Date.now();
         dbgBg('SAVE_TO_NOTION: creating page in Notion with', { properties: sanitizeForLog(safeProps), children: sanitizeForLog(blocks) });
