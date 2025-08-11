@@ -8,6 +8,14 @@ const NOTION_VERSION = '2022-06-28'; // latest per Notion docs
 const OPENAI_API_BASE = 'https://api.openai.com/v1';
 const GPT5_NANO_MODEL = 'gpt-5-nano';
 
+// Debug logging helper
+const DEBUG_LOGS = true;
+function dbgBg(...args) {
+  if (!DEBUG_LOGS) return;
+  const ts = new Date().toISOString();
+  console.log(`[NotionMagicClipper][BG ${ts}]`, ...args);
+}
+
 // Helpers to get/set tokens in storage
 async function getConfig() {
   return new Promise((resolve) => {
@@ -242,6 +250,7 @@ async function openaiChat(messages, { model = GPT5_NANO_MODEL, temperature = 0.2
   const data = await resp.json();
   const content = data.choices?.[0]?.message?.content?.trim();
   if (!content) throw new Error('Respuesta vacía del modelo.');
+  dbgBg('openaiChat: response chars =', content.length);
   return content;
 }
 
@@ -432,6 +441,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
     if (message?.type === 'LIST_DATABASES') {
       try {
+        dbgBg('LIST_DATABASES: query =', message.query);
         const { notionSearchQuery } = await getConfig();
         const bases = await listDatabases(message.query ?? notionSearchQuery ?? '');
         sendResponse({ ok: true, databases: bases });
@@ -482,8 +492,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const { databaseId, pageContext, note } = message;
         if (!databaseId) throw new Error('databaseId faltante');
         if (!pageContext) throw new Error('pageContext faltante');
+        dbgBg('SAVE_TO_NOTION: start', { databaseId, url: pageContext?.url });
 
         const db = await getDatabase(databaseId);
+        dbgBg('SAVE_TO_NOTION: fetched database schema');
         const schemaForLLM = extractSchemaForPrompt(db);
         const { openai_reasoning_effort, openai_verbosity, databasePrompts } = await getConfig();
         const customInstructions = (databasePrompts || {})[databaseId] || '';
@@ -494,12 +506,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           reasoning_effort: openai_reasoning_effort || 'low',
           verbosity: openai_verbosity || 'low'
         });
+        dbgBg('SAVE_TO_NOTION: received LLM content');
 
         // Parse JSON block from content (robust extractor)
         const parsed = extractJsonObject(content);
         if (!parsed) {
           throw new Error('The model did not return valid JSON for properties.');
         }
+        dbgBg('SAVE_TO_NOTION: parsed JSON');
 
         if (!parsed || typeof parsed !== 'object' || !parsed.properties) {
           throw new Error('Falta la clave "properties" en la salida del modelo.');
@@ -510,6 +524,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (urlPropName && !parsed.properties[urlPropName] && pageContext.url) {
           parsed.properties[urlPropName] = { url: pageContext.url };
         }
+        dbgBg('SAVE_TO_NOTION: ensured URL property');
 
         // Sanitize and normalize properties to valid Notion API shapes
         function sanitizeProperties(db, props) {
@@ -634,6 +649,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
 
         let safeProps = sanitizeProperties(db, parsed.properties);
+        dbgBg('SAVE_TO_NOTION: sanitized properties');
         // Ensure title property exists with a valid shape
         const titlePropName = Object.entries(db.properties || {}).find(([, def]) => def.type === 'title')?.[0];
         if (titlePropName) {
@@ -649,6 +665,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (parsed.children || parsed.blocks || parsed.content) {
           children = sanitizeBlocks(parsed.children || parsed.blocks || parsed.content || []);
         }
+        dbgBg('SAVE_TO_NOTION: prepared children blocks', children.length);
         // Append uploaded images (from popup) as blocks
         const attachmentBlocks = Array.isArray(message.attachments)
           ? message.attachments
@@ -657,13 +674,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           : [];
         // Ensure select options exist (auto-create missing ones)
         await ensureSelectOptions(databaseId, safeProps);
+        dbgBg('SAVE_TO_NOTION: ensured select options');
         // Always add user note and bookmark at the top if provided
         const addon = buildBookmarkBlocks(pageContext.url, note);
         const blocks = addon.concat(attachmentBlocks).concat(children);
         // Prefer the start time from the popup for end-to-end duration; fallback to now
         const t0 = typeof message.startedAt === 'number' ? message.startedAt : Date.now();
+        dbgBg('SAVE_TO_NOTION: creating page in Notion');
         const created = await createPageInDatabase(databaseId, safeProps, blocks);
         const t1 = Date.now();
+        dbgBg('SAVE_TO_NOTION: page created');
         const pageUrl = created?.url || created?.public_url || '';
         // Try to extract a final page title from properties
         const titlePropNameFinal = Object.entries(db.properties || {}).find(([, def]) => def.type === 'title')?.[0];

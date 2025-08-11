@@ -24,6 +24,7 @@ async function precheck() {
     pre.innerHTML = `<div class="success">Tokens configured. Ready to save.</div>`;
   }
   app.style.display = 'block';
+  console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] precheck complete`);
 }
 
 async function listDatabases(query) {
@@ -42,6 +43,7 @@ async function loadDatabases() {
   const search = document.getElementById('search');
   const sel = document.getElementById('databases');
   sel.innerHTML = '';
+  console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Loading databases…`);
   const list = await listDatabases(search.value.trim());
   if (!list.length) {
     sel.innerHTML = '<option>(No databases are shared with your integration)</option>';
@@ -56,6 +58,7 @@ async function loadDatabases() {
     opt.textContent = (emoji ? `${emoji} ` : '') + db.title;
     sel.appendChild(opt);
   });
+  console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Databases loaded:`, list.length);
 }
 
 async function getPageContext(tabId) {
@@ -87,6 +90,7 @@ async function save() {
   // Record when the save was initiated by the user
   const startedAt = Date.now();
   const tab = await getCurrentTab();
+  console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Save clicked. Getting page context…`);
   let context;
   try {
     context = await getPageContext(tab.id);
@@ -95,6 +99,7 @@ async function save() {
     return;
   }
   status.textContent = 'Analyzing content with GPT-5 Nano and saving to Notion...';
+  console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Got page context. Sending SAVE_TO_NOTION…`);
   const note = document.getElementById('note').value.trim();
   const res = await chrome.runtime.sendMessage({
     type: 'SAVE_TO_NOTION',
@@ -104,9 +109,11 @@ async function save() {
     startedAt
   });
   if (!res?.ok) {
+    console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Save failed:`, res?.error);
     status.innerHTML = `<span class="error">${res?.error || 'Error saving'}</span>`;
     return;
   }
+  console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Save success. Page created.`);
   const pageUrl = res?.page?.url || res?.page?.public_url;
   status.innerHTML = `<span class="success">Saved successfully ✅</span>` + (pageUrl ? `<div class="success-link"><a href="${pageUrl}" target="_blank" rel="noopener noreferrer">Open in Notion ↗</a></div>` : '');
 }
