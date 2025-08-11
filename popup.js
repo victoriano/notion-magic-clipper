@@ -98,6 +98,45 @@ async function save() {
     status.textContent = String(e.message || e);
     return;
   }
+  // Pretty/safe log of the full page context for inspection
+  (function logContext(ctx) {
+    function sanitizeForLog(value, depth = 0) {
+      const MAX_DEPTH = 3;
+      const MAX_STRING = 300;
+      const MAX_ARRAY = 10;
+      if (value == null) return value;
+      if (typeof value === 'string') {
+        return value.length > MAX_STRING ? value.slice(0, MAX_STRING) + '…' : value;
+      }
+      if (typeof value !== 'object') return value;
+      if (depth >= MAX_DEPTH) return '…';
+      if (Array.isArray(value)) {
+        return value
+          .slice(0, MAX_ARRAY)
+          .map((v) => sanitizeForLog(v, depth + 1))
+          .concat(value.length > MAX_ARRAY ? ['…'] : []);
+      }
+      const out = {};
+      for (const [k, v] of Object.entries(value)) {
+        out[k] = sanitizeForLog(v, depth + 1);
+      }
+      return out;
+    }
+    console.log(
+      `[NotionMagicClipper][Popup ${new Date().toISOString()}] Page context:`,
+      sanitizeForLog(ctx)
+    );
+    console.log(
+      `[NotionMagicClipper][Popup ${new Date().toISOString()}] Context counts:`,
+      {
+        headings: ctx.headings?.length || 0,
+        listItems: ctx.listItems?.length || 0,
+        shortSpans: ctx.shortSpans?.length || 0,
+        attrTexts: ctx.attrTexts?.length || 0,
+        images: ctx.images?.length || 0
+      }
+    );
+  })(context);
   status.textContent = 'Analyzing content with GPT-5 Nano and saving to Notion...';
   console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Got page context. Sending SAVE_TO_NOTION…`);
   const note = document.getElementById('note').value.trim();

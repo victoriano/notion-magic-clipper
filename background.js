@@ -16,6 +16,27 @@ function dbgBg(...args) {
   console.log(`[NotionMagicClipper][BG ${ts}]`, ...args);
 }
 
+// Produce a compact, safe view of large objects for logging
+function sanitizeForLog(value, depth = 0) {
+  const MAX_DEPTH = 3;
+  const MAX_STRING = 300;
+  const MAX_ARRAY = 5;
+  if (value == null) return value;
+  if (typeof value === 'string') {
+    return value.length > MAX_STRING ? value.slice(0, MAX_STRING) + '…' : value;
+  }
+  if (typeof value !== 'object') return value;
+  if (depth >= MAX_DEPTH) return '…';
+  if (Array.isArray(value)) {
+    return value.slice(0, MAX_ARRAY).map((v) => sanitizeForLog(v, depth + 1)).concat(value.length > MAX_ARRAY ? ['…'] : []);
+  }
+  const out = {};
+  for (const [k, v] of Object.entries(value)) {
+    out[k] = sanitizeForLog(v, depth + 1);
+  }
+  return out;
+}
+
 // Helpers to get/set tokens in storage
 async function getConfig() {
   return new Promise((resolve) => {
@@ -256,9 +277,9 @@ async function openaiChat(messages, { model = GPT5_NANO_MODEL, temperature = 0.2
 
 // Build a prompt to map page context to Notion properties
 function buildPromptForProperties(schema, pageContext, customInstructions) {
-  const { url, title, meta, selectionText, textSample } = pageContext;
+  const { url, title, meta, selectionText, textSample, headings, listItems, shortSpans, attrTexts, images } = pageContext;
   const schemaStr = JSON.stringify(schema, null, 2);
-  const contextStr = JSON.stringify({ url, title, meta, selectionText, textSample }, null, 2);
+  const contextStr = JSON.stringify({ url, title, meta, selectionText, textSample, headings, listItems, shortSpans, attrTexts, images }, null, 2);
   const messages = [
     {
       role: 'system',
@@ -497,9 +518,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const db = await getDatabase(databaseId);
         dbgBg('SAVE_TO_NOTION: fetched database schema');
         const schemaForLLM = extractSchemaForPrompt(db);
+        dbgBg('SAVE_TO_NOTION: schemaForLLM', sanitizeForLog(schemaForLLM));
         const { openai_reasoning_effort, openai_verbosity, databasePrompts } = await getConfig();
         const customInstructions = (databasePrompts || {})[databaseId] || '';
         const prompt = buildPromptForProperties(schemaForLLM, pageContext, customInstructions);
+        dbgBg('SAVE_TO_NOTION: prompt (messages)', sanitizeForLog(prompt));
 
         const content = await openaiChat(prompt, {
           model: GPT5_NANO_MODEL,
@@ -513,7 +536,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (!parsed) {
           throw new Error('The model did not return valid JSON for properties.');
         }
-        dbgBg('SAVE_TO_NOTION: parsed JSON');
+        dbgBg('SAVE_TO_NOTION: parsed JSON', sanitizeForLog(parsed));
 
         if (!parsed || typeof parsed !== 'object' || !parsed.properties) {
           throw new Error('Falta la clave "properties" en la salida del modelo.');
@@ -524,7 +547,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (urlPropName && !parsed.properties[urlPropName] && pageContext.url) {
           parsed.properties[urlPropName] = { url: pageContext.url };
         }
-        dbgBg('SAVE_TO_NOTION: ensured URL property');
+        dbgBg('SAVE_TO_NOTION: ensured URL property', urlPropName ? { [urlPropName]: parsed.properties[urlPropName] } : {});
 
         // Sanitize and normalize properties to valid Notion API shapes
         function sanitizeProperties(db, props) {
@@ -649,7 +672,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
 
         let safeProps = sanitizeProperties(db, parsed.properties);
-        dbgBg('SAVE_TO_NOTION: sanitized properties');
+        dbgBg('SAVE_TO_NOTION: sanitized properties', sanitizeForLog(safeProps));
         // Ensure title property exists with a valid shape
         const titlePropName = Object.entries(db.properties || {}).find(([, def]) => def.type === 'title')?.[0];
         if (titlePropName) {
@@ -665,7 +688,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (parsed.children || parsed.blocks || parsed.content) {
           children = sanitizeBlocks(parsed.children || parsed.blocks || parsed.content || []);
         }
-        dbgBg('SAVE_TO_NOTION: prepared children blocks', children.length);
+        dbgBg('SAVE_TO_NOTION: prepared children blocks', children.length, sanitizeForLog(children));
         // Append uploaded images (from popup) as blocks
         const attachmentBlocks = Array.isArray(message.attachments)
           ? message.attachments
@@ -674,16 +697,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           : [];
         // Ensure select options exist (auto-create missing ones)
         await ensureSelectOptions(databaseId, safeProps);
-        dbgBg('SAVE_TO_NOTION: ensured select options');
+        dbgBg('SAVE_TO_NOTION: ensured select options (props sent to check)', sanitizeForLog(safeProps));
         // Always add user note and bookmark at the top if provided
         const addon = buildBookmarkBlocks(pageContext.url, note);
         const blocks = addon.concat(attachmentBlocks).concat(children);
         // Prefer the start time from the popup for end-to-end duration; fallback to now
         const t0 = typeof message.startedAt === 'number' ? message.startedAt : Date.now();
-        dbgBg('SAVE_TO_NOTION: creating page in Notion');
+        dbgBg('SAVE_TO_NOTION: creating page in Notion with', { properties: sanitizeForLog(safeProps), children: sanitizeForLog(blocks) });
         const created = await createPageInDatabase(databaseId, safeProps, blocks);
         const t1 = Date.now();
-        dbgBg('SAVE_TO_NOTION: page created');
+        dbgBg('SAVE_TO_NOTION: page created', sanitizeForLog({ id: created?.id, url: created?.url || created?.public_url, properties: created?.properties }));
         const pageUrl = created?.url || created?.public_url || '';
         // Try to extract a final page title from properties
         const titlePropNameFinal = Object.entries(db.properties || {}).find(([, def]) => def.type === 'title')?.[0];
