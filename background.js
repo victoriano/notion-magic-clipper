@@ -993,15 +993,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
         }
         let children = [];
-        if (effectiveSaveArticle && Array.isArray(pageContext.articleBlocks) && pageContext.articleBlocks.length) {
-          // Use deterministic article blocks built in the content script
-          children = sanitizeBlocks(pageContext.articleBlocks);
-        } else if (parsed && (parsed.children || parsed.blocks || parsed.content)) {
-          children = sanitizeBlocks(parsed.children || parsed.blocks || parsed.content || []);
-        } else if (!effectiveSaveArticle) {
-          // As a last resort when article is disabled but the model didn't return blocks, build from textSample
-          const sample = typeof pageContext.textSample === 'string' ? pageContext.textSample : '';
-          children = blocksFromTextSample(sample);
+        if (effectiveSaveArticle) {
+          if (Array.isArray(pageContext.articleBlocks) && pageContext.articleBlocks.length) {
+            // Use deterministic article blocks built in the content script
+            children = sanitizeBlocks(pageContext.articleBlocks);
+          } else if (parsed && (parsed.children || parsed.blocks || parsed.content)) {
+            children = sanitizeBlocks(parsed.children || parsed.blocks || parsed.content || []);
+          }
+          // When article is disabled, we intentionally ignore any children returned by the model
+          // and do not synthesize blocks from textSample.
         }
         dbgBg('SAVE_TO_NOTION: prepared children blocks', children.length, sanitizeForLog(children));
         // Append uploaded images (from popup) as blocks
