@@ -121,6 +121,10 @@ function collectPageContext() {
       parentText: textTrim(img.parentElement?.innerText || ''),
       classes: textTrim(img.className, 160),
       parentClasses: textTrim(img.parentElement?.className, 160),
+      width: img.naturalWidth || undefined,
+      height: img.naturalHeight || undefined,
+      renderedWidth: img.clientWidth || undefined,
+      renderedHeight: img.clientHeight || undefined,
       tag: img.tagName
     };
     if (img.src) addImage(img.src, baseCtx);
@@ -141,6 +145,8 @@ function collectPageContext() {
       nearestHeading: findNearestHeading(s),
       parentText: textTrim(s.parentElement?.innerText || ''),
       parentClasses: textTrim(s.parentElement?.className || picture?.className, 160),
+      renderedWidth: (picture?.clientWidth || s.clientWidth) || undefined,
+      renderedHeight: (picture?.clientHeight || s.clientHeight) || undefined,
       tag: s.tagName
     };
     const ss = s.getAttribute('srcset');
@@ -166,6 +172,8 @@ function collectPageContext() {
           parentText: textTrim(el.innerText || el.textContent || ''),
           classes: textTrim(el.className, 160),
           parentClasses: textTrim(el.parentElement?.className, 160),
+          renderedWidth: el.clientWidth || undefined,
+          renderedHeight: el.clientHeight || undefined,
           tag: el.tagName
         });
       }
