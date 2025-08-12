@@ -6,6 +6,37 @@ function getMetaTag(name) {
   return el ? el.getAttribute('content') : undefined;
 }
 
+function tryReadabilityExtract() {
+  try {
+    // Guard against missing global Readability (should be injected via manifest ordering)
+    if (typeof Readability !== 'function') return null;
+    // Clone the document to avoid mutating the live page
+    const docClone = document.cloneNode(true);
+    const reader = new Readability(docClone, {
+      // keepClasses: false by default; we want clean content
+      // You can tweak thresholds here if needed
+    });
+    const article = reader.parse();
+    if (!article || !article.content || !article.textContent) return null;
+    // Some sites may not be considered long article, but still useful
+    // We rely on Readability's own charThreshold default (500) which is fine
+    return {
+      title: article.title || undefined,
+      byline: article.byline || undefined,
+      dir: article.dir || undefined,
+      siteName: article.siteName || undefined,
+      lang: article.lang || undefined,
+      publishedTime: article.publishedTime || undefined,
+      excerpt: article.excerpt || undefined,
+      length: article.length || undefined,
+      html: article.content, // HTML string
+      text: article.textContent // plain text
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
 function collectPageContext() {
   const meta = {};
   const metaNames = [
@@ -17,8 +48,11 @@ function collectPageContext() {
     if (v) meta[n] = v;
   });
 
-  // Get some text sample: first few paragraphs (up to 20)
-  const paragraphs = Array.from(document.querySelectorAll('article p, main p, p')).slice(0, 20);
+  // Attempt to parse an article with Readability
+  const article = tryReadabilityExtract();
+
+  // Get some text sample: first few paragraphs (up to 10)
+  const paragraphs = Array.from(document.querySelectorAll('article p, main p, p')).slice(0, 10);
   const textSample = paragraphs
     .map((p) => p.innerText.trim())
     .filter(Boolean)
@@ -192,7 +226,9 @@ function collectPageContext() {
     listItems,
     shortSpans,
     attrTexts,
-    images
+    images,
+    // If Readability detected an article, expose it. Else keep undefined.
+    article
   };
 }
 

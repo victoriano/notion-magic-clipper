@@ -470,9 +470,9 @@ async function openaiChat(messages, { model = GPT5_NANO_MODEL, temperature = 0.2
 
 // Build a prompt to map page context to Notion properties
 function buildPromptForProperties(schema, pageContext, customInstructions) {
-  const { url, title, meta, selectionText, textSample, headings, listItems, shortSpans, attrTexts, images } = pageContext;
+  const { url, title, meta, selectionText, textSample, headings, listItems, shortSpans, attrTexts, images, article } = pageContext;
   const schemaStr = JSON.stringify(schema, null, 2);
-  const contextStr = JSON.stringify({ url, title, meta, selectionText, textSample, headings, listItems, shortSpans, attrTexts, images }, null, 2);
+  const contextStr = JSON.stringify({ url, title, meta, selectionText, textSample, headings, listItems, shortSpans, attrTexts, images, article }, null, 2);
   const messages = [
     {
       role: 'system',
@@ -481,7 +481,8 @@ function buildPromptForProperties(schema, pageContext, customInstructions) {
         'Return only VALID JSON shaped as { "properties": { ... }, "children"?: [ ... ] }.',
         '- "properties": must use the exact Notion API structure and respect the provided schema types.',
         '- "children" (optional): list of Notion blocks using ONLY: paragraph, heading_1, heading_2, heading_3, bulleted_list_item, numbered_list_item, quote, bookmark, image.',
-        'Use simple rich_text with plain text in each block; do not include comments or text outside the JSON.'
+        'Use simple rich_text with plain text in each block; do not include comments or text outside the JSON.',
+        'If pageContext.article is present, prefer its title and use article.text (plain) or article.html (if you need to pick paragraphs) as the primary content; otherwise fall back to the provided textSample/headings.'
       ].join(' ')
     },
     {

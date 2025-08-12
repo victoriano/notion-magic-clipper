@@ -70,8 +70,13 @@ async function getPageContext(tabId) {
     const msg = String(err?.message || err || '');
     const receivingEnd = msg.includes('Receiving end does not exist') || msg.includes('Could not establish connection');
     if (!receivingEnd) throw err;
-    // Fallback: inject content script and retry
-    await chrome.scripting.executeScript({ target: { tabId }, files: ['contentScript.js'] });
+    // Fallback: inject vendor readability and content script in order, then retry
+    await chrome.scripting.executeScript({ target: { tabId }, files: [
+      'vendor/readability/JSDOMParser.js',
+      'vendor/readability/Readability.js',
+      'vendor/readability/Readability-readerable.js',
+      'contentScript.js'
+    ] });
     const res2 = await chrome.tabs.sendMessage(tabId, { type: 'GET_PAGE_CONTEXT' });
     if (!res2?.ok) throw new Error(res2?.error || 'Could not get context after injecting content script');
     return res2.context;
