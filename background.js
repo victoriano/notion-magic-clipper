@@ -115,6 +115,15 @@ async function createPageInDatabase(databaseId, properties, pageContentBlocks = 
   });
 }
 
+// Append up to 100 child blocks to a page or block
+async function appendChildrenBlocks(parentBlockId, children = []) {
+  if (!Array.isArray(children) || children.length === 0) return null;
+  return notionFetch(`/blocks/${parentBlockId}/children`, {
+    method: 'PATCH',
+    body: JSON.stringify({ children })
+  });
+}
+
 // Start a direct (single-part) file upload; returns { file_upload_id, upload_url }
 async function startFileUpload(filename) {
   const body = { mode: 'single_part', filename: filename || 'upload.bin' };
@@ -296,7 +305,7 @@ async function materializeExternalImagesInPropsAndBlocks(db, props, blocks, { ma
     props[propName] = { files: out };
   }
 
-  // Convert image blocks and drop invalid external URLs
+  // Convert image blocks to uploads when possible, otherwise keep as external
   const toRemove = [];
   for (let i = 0; i < blocks.length; i++) {
     const b = blocks[i];
@@ -308,7 +317,11 @@ async function materializeExternalImagesInPropsAndBlocks(db, props, blocks, { ma
         const fid = up.file_upload_id || up.id;
         b.image = { file_upload: { id: fid } };
       } else {
-        toRemove.push(i);
+        // Keep external image if upload fails; Notion can render external URLs
+        if (!b.image?.external?.url) {
+          // If we got here via b.url, move it to the expected shape
+          b.image = { external: { url: ext } };
+        }
       }
     }
   }
@@ -478,11 +491,12 @@ function buildPromptForProperties(schema, pageContext, customInstructions) {
       role: 'system',
       content: [
         'You are an assistant that generates both Notion PROPERTIES and CONTENT from a database schema and page context.',
-        'Return only VALID JSON shaped as { "properties": { ... }, "children"?: [ ... ] }.',
+        'Return only VALID JSON shaped as { "properties": { ... }, "children": [ ... ] }.',
         '- "properties": must use the exact Notion API structure and respect the provided schema types.',
-        '- "children" (optional): list of Notion blocks using ONLY: paragraph, heading_1, heading_2, heading_3, bulleted_list_item, numbered_list_item, quote, bookmark, image.',
+        '- "children": MUST be present and be a list of Notion blocks using ONLY: paragraph, heading_1, heading_2, heading_3, bulleted_list_item, numbered_list_item, quote, bookmark, image.',
         'Use simple rich_text with plain text in each block; do not include comments or text outside the JSON.',
-        'If pageContext.article is present, prefer its title and use article.text (plain) or article.html (if you need to pick paragraphs) as the primary content; otherwise fall back to the provided textSample/headings.'
+        'When pageContext.article is present, you MUST set children to the article content converted into Notion blocks unless the user disables saving the article content. Prefer article.html to preserve structure (map h1–h3 to heading_1–heading_3, p to paragraph, ul/li to bulleted_list_item, ol/li to numbered_list_item, blockquote to quote); fall back to article.text if needed. Only deviate from using the article content if the database-specific custom instructions explicitly instruct otherwise.',
+        'When pageContext.article is NOT present, build children from textSample and headings as a concise, structured summary.'
       ].join(' ')
     },
     {
@@ -500,7 +514,8 @@ function buildPromptForProperties(schema, pageContext, customInstructions) {
         '- For url, set the page URL if an appropriate property exists.',
         '- Omit properties you cannot determine (do not invent values).',
         '- Do NOT include read-only properties (rollup, created_time, etc.).',
-        '- Optionally, generate "children" with brief structured blocks extracted from the context (e.g., headings and bullets).',
+        '- Always generate "children". If pageContext.article exists, convert the article content into Notion blocks (see mapping above) and include it as the page content. If there is no article, generate children from textSample/headings.',
+        '- You may omit or alter article content ONLY if the custom database instructions explicitly say so.',
         '- Return ONLY one JSON object shaped as { "properties": { ... }, "children"?: [ ... ] }.'
       ].join('\n')
     }
@@ -539,25 +554,9 @@ function extractSchemaForPrompt(database) {
   return simplified;
 }
 
+// Deprecated: no longer auto-prepend bookmark/note blocks to output
 function buildBookmarkBlocks(url, note) {
-  const blocks = [];
-  if (note) {
-    blocks.push({
-      object: 'block',
-      type: 'paragraph',
-      paragraph: {
-        rich_text: [{ type: 'text', text: { content: note } }]
-      }
-    });
-  }
-  if (url) {
-    blocks.push({
-      object: 'block',
-      type: 'bookmark',
-      bookmark: { url }
-    });
-  }
-  return blocks;
+  return [];
 }
 
 function stripForbiddenFieldsFromBlocks(blocks) {
@@ -718,7 +717,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     if (message?.type === 'SAVE_TO_NOTION') {
       try {
-        const { databaseId, pageContext, note } = message;
+        const { databaseId, pageContext, note, saveArticle } = message;
         if (!databaseId) throw new Error('databaseId faltante');
         if (!pageContext) throw new Error('pageContext faltante');
         dbgBg('SAVE_TO_NOTION: start', { databaseId, url: pageContext?.url });
@@ -928,7 +927,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
         }
         let children = [];
-        if (parsed.children || parsed.blocks || parsed.content) {
+        if (saveArticle && Array.isArray(pageContext.articleBlocks) && pageContext.articleBlocks.length) {
+          // Use deterministic article blocks built in the content script
+          children = sanitizeBlocks(pageContext.articleBlocks);
+        } else if (parsed.children || parsed.blocks || parsed.content) {
           children = sanitizeBlocks(parsed.children || parsed.blocks || parsed.content || []);
         }
         dbgBg('SAVE_TO_NOTION: prepared children blocks', children.length, sanitizeForLog(children));
@@ -962,9 +964,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // Ensure select options exist (auto-create missing ones)
         await ensureSelectOptions(databaseId, safeProps);
         dbgBg('SAVE_TO_NOTION: ensured select options (props sent to check)', sanitizeForLog(safeProps));
-        // Always add user note and bookmark at the top if provided
-        const addon = buildBookmarkBlocks(pageContext.url, note);
-        const blocks = addon.concat(attachmentBlocks).concat(children);
+        // Do not prepend bookmark/note. Note becomes extra LLM context only.
+        const blocks = attachmentBlocks.concat(children);
         // Materialize external image URLs into Notion-hosted uploads (both blocks and files properties)
         await materializeExternalImagesInPropsAndBlocks(db, safeProps, blocks, { maxUploads: 6 });
         // Ensure we do not send forbidden fields to Notion (e.g., file_upload.file_upload_id in blocks)
@@ -972,10 +973,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // Prefer the start time from the popup for end-to-end duration; fallback to now
         const t0 = typeof message.startedAt === 'number' ? message.startedAt : Date.now();
         dbgBg('SAVE_TO_NOTION: creating page in Notion with', { properties: sanitizeForLog(safeProps), children: sanitizeForLog(blocks) });
-        const created = await createPageInDatabase(databaseId, safeProps, blocks);
+        // Notion limits initial children to 100; create page with up to 100, then append the rest
+        const firstBatch = blocks.slice(0, 100);
+        const created = await createPageInDatabase(databaseId, safeProps, firstBatch);
         const t1 = Date.now();
         dbgBg('SAVE_TO_NOTION: page created', sanitizeForLog({ id: created?.id, url: created?.url || created?.public_url, properties: created?.properties }));
         const pageUrl = created?.url || created?.public_url || '';
+        // Append remaining children batches in chunks of 100
+        const rest = blocks.slice(100);
+        const parentId = created?.id;
+        for (let i = 0; i < rest.length && parentId; i += 100) {
+          const chunk = rest.slice(i, i + 100);
+          try {
+            await appendChildrenBlocks(parentId, chunk);
+            dbgBg('SAVE_TO_NOTION: appended children chunk', { offset: i, count: chunk.length });
+          } catch (e) {
+            dbgBg('SAVE_TO_NOTION: append failed', { offset: i, count: chunk.length, error: String(e?.message || e) });
+            break; // stop on first error to avoid partial spam
+          }
+        }
         // Try to extract a final page title from properties
         const titlePropNameFinal = Object.entries(db.properties || {}).find(([, def]) => def.type === 'title')?.[0];
         const finalTitle = titlePropNameFinal && created?.properties?.[titlePropNameFinal]?.title

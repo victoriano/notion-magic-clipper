@@ -37,6 +37,117 @@ function tryReadabilityExtract() {
   }
 }
 
+function convertArticleHtmlToBlocks(html, { maxBlocks = 160, maxTextLen = 2000 } = {}) {
+  try {
+    const container = document.createElement('div');
+    container.innerHTML = html;
+    const blocks = [];
+
+    const toRichText = (text) => [{ type: 'text', text: { content: text } }];
+
+    function pushTextBlock(type, text) {
+      const t = (text || '').replace(/\s+/g, ' ').trim();
+      if (!t) return;
+      const clipped = t.length > maxTextLen ? t.slice(0, maxTextLen) : t;
+      blocks.push({ object: 'block', type, [type]: { rich_text: toRichText(clipped) } });
+    }
+
+    function pushImage(url) {
+      if (!url || /^data:/i.test(url)) return;
+      try { url = new URL(url, location.href).href; } catch {}
+      blocks.push({ object: 'block', type: 'image', image: { external: { url } } });
+    }
+
+    function firstSrcFromSrcset(srcset) {
+      if (!srcset) return undefined;
+      const first = String(srcset).split(',')[0];
+      return first ? first.trim().split(' ')[0] : undefined;
+    }
+
+    function handleFigure(fig) {
+      const img = fig.querySelector('img');
+      if (img) {
+        const url = img.getAttribute('src') || firstSrcFromSrcset(img.getAttribute('srcset'));
+        if (url) pushImage(url);
+      }
+      const cap = fig.querySelector('figcaption');
+      if (cap) pushTextBlock('paragraph', cap.innerText || cap.textContent || '');
+    }
+
+    function walk(node) {
+      if (!node || blocks.length >= maxBlocks) return;
+      if (node.nodeType === Node.TEXT_NODE) {
+        const t = String(node.nodeValue || '').trim();
+        if (t) pushTextBlock('paragraph', t);
+        return;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) return;
+      const el = node;
+      const tag = el.tagName ? el.tagName.toLowerCase() : '';
+      if (tag === 'script' || tag === 'style' || tag === 'noscript') return;
+
+      switch (tag) {
+        case 'h1':
+          pushTextBlock('heading_1', el.innerText || el.textContent || '');
+          return;
+        case 'h2':
+          pushTextBlock('heading_2', el.innerText || el.textContent || '');
+          return;
+        case 'h3':
+          pushTextBlock('heading_3', el.innerText || el.textContent || '');
+          return;
+        case 'p':
+          pushTextBlock('paragraph', el.innerText || el.textContent || '');
+          return;
+        case 'blockquote':
+          pushTextBlock('quote', el.innerText || el.textContent || '');
+          return;
+        case 'ul': {
+          const items = el.querySelectorAll(':scope > li');
+          items.forEach((li) => {
+            if (blocks.length >= maxBlocks) return;
+            pushTextBlock('bulleted_list_item', li.innerText || li.textContent || '');
+          });
+          return;
+        }
+        case 'ol': {
+          const items = el.querySelectorAll(':scope > li');
+          items.forEach((li) => {
+            if (blocks.length >= maxBlocks) return;
+            pushTextBlock('numbered_list_item', li.innerText || li.textContent || '');
+          });
+          return;
+        }
+        case 'img': {
+          const url = el.getAttribute('src') || firstSrcFromSrcset(el.getAttribute('srcset'));
+          if (url) pushImage(url);
+          return;
+        }
+        case 'figure': {
+          handleFigure(el);
+          return;
+        }
+        default:
+          // Walk children for other containers (div, section, article, etc.)
+          const children = Array.from(el.childNodes);
+          for (const c of children) {
+            if (blocks.length >= maxBlocks) break;
+            walk(c);
+          }
+      }
+    }
+
+    const kids = Array.from(container.childNodes);
+    for (const n of kids) {
+      if (blocks.length >= maxBlocks) break;
+      walk(n);
+    }
+    return blocks;
+  } catch (_) {
+    return [];
+  }
+}
+
 function collectPageContext() {
   const meta = {};
   const metaNames = [
@@ -50,14 +161,21 @@ function collectPageContext() {
 
   // Attempt to parse an article with Readability
   const article = tryReadabilityExtract();
+  let articleBlocks = undefined;
+  if (article && article.html) {
+    articleBlocks = convertArticleHtmlToBlocks(article.html);
+  }
 
-  // Get some text sample: first few paragraphs (up to 10)
-  const paragraphs = Array.from(document.querySelectorAll('article p, main p, p')).slice(0, 10);
-  const textSample = paragraphs
-    .map((p) => p.innerText.trim())
-    .filter(Boolean)
-    .join('\n')
-    .slice(0, 6000);
+  // Only compute a paragraph sample if there's no article
+  let textSample;
+  if (!article) {
+    const paragraphs = Array.from(document.querySelectorAll('article p, main p, p')).slice(0, 10);
+    textSample = paragraphs
+      .map((p) => p.innerText.trim())
+      .filter(Boolean)
+      .join('\n')
+      .slice(0, 6000);
+  }
 
   const selectionText = window.getSelection()?.toString()?.trim() || '';
 
@@ -221,14 +339,15 @@ function collectPageContext() {
     title: document.title,
     meta,
     selectionText,
-    textSample,
+    ...(textSample ? { textSample } : {}),
     headings,
     listItems,
     shortSpans,
     attrTexts,
     images,
     // If Readability detected an article, expose it. Else keep undefined.
-    article
+    article,
+    ...(Array.isArray(articleBlocks) && articleBlocks.length ? { articleBlocks } : {})
   };
 }
 
