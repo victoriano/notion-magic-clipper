@@ -47,7 +47,8 @@ async function getConfig() {
         'notionSearchQuery',
         'openai_reasoning_effort',
         'openai_verbosity',
-        'databasePrompts'
+        'databasePrompts',
+        'databaseSettings'
       ],
       (res) => resolve(res)
     );
@@ -482,22 +483,45 @@ async function openaiChat(messages, { model = GPT5_NANO_MODEL, temperature = 0.2
 }
 
 // Build a prompt to map page context to Notion properties
-function buildPromptForProperties(schema, pageContext, customInstructions) {
+function buildPromptForProperties(schema, pageContext, customInstructions, { useArticle } = { useArticle: true }) {
   const { url, title, meta, selectionText, textSample, headings, listItems, shortSpans, attrTexts, images, article } = pageContext;
   const schemaStr = JSON.stringify(schema, null, 2);
-  const contextStr = JSON.stringify({ url, title, meta, selectionText, textSample, headings, listItems, shortSpans, attrTexts, images, article }, null, 2);
+
+  // If we should not use the article, ensure we provide a sample: use existing textSample or derive from article.text
+  let effectiveTextSample = textSample;
+  if (!useArticle) {
+    if (!effectiveTextSample && article && typeof article.text === 'string') {
+      try {
+        const parts = article.text.split(/\n\s*\n+/).map((s) => s.trim()).filter(Boolean);
+        effectiveTextSample = parts.slice(0, 10).join('\n\n').slice(0, 6000);
+      } catch {}
+    }
+  }
+
+  const baseContext = { url, title, meta, selectionText, headings, listItems, shortSpans, attrTexts, images };
+  if (useArticle) Object.assign(baseContext, { article });
+  if (effectiveTextSample) Object.assign(baseContext, { textSample: effectiveTextSample });
+  const contextStr = JSON.stringify(baseContext, null, 2);
   const messages = [
     {
       role: 'system',
-      content: [
-        'You are an assistant that generates both Notion PROPERTIES and CONTENT from a database schema and page context.',
-        'Return only VALID JSON shaped as { "properties": { ... }, "children": [ ... ] }.',
-        '- "properties": must use the exact Notion API structure and respect the provided schema types.',
-        '- "children": MUST be present and be a list of Notion blocks using ONLY: paragraph, heading_1, heading_2, heading_3, bulleted_list_item, numbered_list_item, quote, bookmark, image.',
-        'Use simple rich_text with plain text in each block; do not include comments or text outside the JSON.',
-        'When pageContext.article is present, you MUST set children to the article content converted into Notion blocks unless the user disables saving the article content. Prefer article.html to preserve structure (map h1–h3 to heading_1–heading_3, p to paragraph, ul/li to bulleted_list_item, ol/li to numbered_list_item, blockquote to quote); fall back to article.text if needed. Only deviate from using the article content if the database-specific custom instructions explicitly instruct otherwise.',
-        'When pageContext.article is NOT present, build children from textSample and headings as a concise, structured summary.'
-      ].join(' ')
+      content: (
+        useArticle
+          ? [
+              'You are an assistant that generates both Notion PROPERTIES and CONTENT from a database schema and page context.',
+              'Return only VALID JSON shaped as { "properties": { ... }, "children": [ ... ] }.',
+              '- "properties": must use the exact Notion API structure and respect the provided schema types.',
+              '- "children": MUST be present and be a list of Notion blocks using ONLY: paragraph, heading_1, heading_2, heading_3, bulleted_list_item, numbered_list_item, quote, bookmark, image.',
+              'Use simple rich_text with plain text in each block; do not include comments or text outside the JSON.',
+              'When pageContext.article is present, you MUST set children to the article content converted into Notion blocks. Prefer article.html to preserve structure (map h1–h3 to heading_1–heading_3, p to paragraph, ul/li to bulleted_list_item, ol/li to numbered_list_item, blockquote to quote); fall back to article.text if needed. Only deviate if the database-specific custom instructions explicitly instruct otherwise.'
+            ].join(' ')
+          : [
+              'You are an assistant that generates Notion PROPERTIES only from a database schema and page context.',
+              'Return only VALID JSON shaped as { "properties": { ... } } (do NOT include "children").',
+              '- "properties": must use the exact Notion API structure and respect the provided schema types.',
+              'Do NOT use pageContext.article. Use only textSample/headings/metadata to determine properties.'
+            ].join(' ')
+      )
     },
     {
       role: 'user',
@@ -514,9 +538,15 @@ function buildPromptForProperties(schema, pageContext, customInstructions) {
         '- For url, set the page URL if an appropriate property exists.',
         '- Omit properties you cannot determine (do not invent values).',
         '- Do NOT include read-only properties (rollup, created_time, etc.).',
-        '- Always generate "children". If pageContext.article exists, convert the article content into Notion blocks (see mapping above) and include it as the page content. If there is no article, generate children from textSample/headings.',
-        '- You may omit or alter article content ONLY if the custom database instructions explicitly say so.',
-        '- Return ONLY one JSON object shaped as { "properties": { ... }, "children"?: [ ... ] }.'
+        ...(useArticle
+          ? [
+              '- Always generate "children". If pageContext.article exists, convert the article content into Notion blocks (see mapping above) and include it as the page content.',
+              '- Return ONLY one JSON object shaped as { "properties": { ... }, "children"?: [ ... ] }.'
+            ]
+          : [
+              '- Do NOT generate "children". Return ONLY one JSON object shaped as { "properties": { ... } }.'
+            ]
+        )
       ].join('\n')
     }
   ];
@@ -629,6 +659,23 @@ function sanitizeBlocks(rawBlocks) {
   return out;
 }
 
+// Build simple paragraph blocks from a text sample
+function blocksFromTextSample(sample, { maxBlocks = 20, maxCharsPerBlock = 1200 } = {}) {
+  if (typeof sample !== 'string' || !sample.trim()) return [];
+  const lines = sample
+    .split(/\n+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  const blocks = [];
+  const toRichText = (text) => [{ type: 'text', text: { content: text } }];
+  for (const line of lines) {
+    if (blocks.length >= maxBlocks) break;
+    const clipped = line.length > maxCharsPerBlock ? line.slice(0, maxCharsPerBlock) : line;
+    blocks.push({ object: 'block', type: 'paragraph', paragraph: { rich_text: toRichText(clipped) } });
+  }
+  return blocks;
+}
+
 // Extract the first valid JSON object from a free-form string.
 function extractJsonObject(text) {
   if (!text || typeof text !== 'string') return null;
@@ -726,10 +773,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         dbgBg('SAVE_TO_NOTION: fetched database schema');
         const schemaForLLM = extractSchemaForPrompt(db);
         dbgBg('SAVE_TO_NOTION: schemaForLLM', sanitizeForLog(schemaForLLM));
-        const { openai_reasoning_effort, openai_verbosity, databasePrompts } = await getConfig();
-        const customInstructions = (databasePrompts || {})[databaseId] || '';
-        const prompt = buildPromptForProperties(schemaForLLM, pageContext, customInstructions);
+        const { openai_reasoning_effort, openai_verbosity, databasePrompts, databaseSettings } = await getConfig();
+        const settingsForDb = (databaseSettings || {})[databaseId] || {};
+        const legacyPrompt = (databasePrompts || {})[databaseId] || '';
+        const customInstructions = (settingsForDb.prompt ?? legacyPrompt) || '';
+        const saveArticleFlag = settingsForDb.saveArticle !== false; // default true per DB
+        const effectiveSaveArticle = (typeof saveArticle === 'boolean' ? saveArticle : saveArticleFlag);
+        const prompt = buildPromptForProperties(schemaForLLM, pageContext, customInstructions, { useArticle: effectiveSaveArticle });
+        dbgBg('SAVE_TO_NOTION: db settings', {
+          databaseId,
+          settingsForDb: sanitizeForLog(settingsForDb),
+          saveArticleMsg: typeof saveArticle === 'boolean' ? saveArticle : undefined,
+          saveArticleFlag,
+          effectiveSaveArticle,
+          articleBlocks: Array.isArray(pageContext.articleBlocks) ? pageContext.articleBlocks.length : 0,
+          hasArticle: !!pageContext.article
+        });
         dbgBg('SAVE_TO_NOTION: prompt (messages)', sanitizeForLog(prompt));
+        try {
+          dbgBg('SAVE_TO_NOTION: prompt (full object)', prompt);
+          dbgBg('SAVE_TO_NOTION: prompt (json)', JSON.stringify(prompt, null, 2));
+        } catch (e) {
+          dbgBg('SAVE_TO_NOTION: prompt logging error', String(e?.message || e));
+        }
 
         const content = await openaiChat(prompt, {
           model: GPT5_NANO_MODEL,
@@ -927,11 +993,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
         }
         let children = [];
-        if (saveArticle && Array.isArray(pageContext.articleBlocks) && pageContext.articleBlocks.length) {
+        if (effectiveSaveArticle && Array.isArray(pageContext.articleBlocks) && pageContext.articleBlocks.length) {
           // Use deterministic article blocks built in the content script
           children = sanitizeBlocks(pageContext.articleBlocks);
-        } else if (parsed.children || parsed.blocks || parsed.content) {
+        } else if (parsed && (parsed.children || parsed.blocks || parsed.content)) {
           children = sanitizeBlocks(parsed.children || parsed.blocks || parsed.content || []);
+        } else if (!effectiveSaveArticle) {
+          // As a last resort when article is disabled but the model didn't return blocks, build from textSample
+          const sample = typeof pageContext.textSample === 'string' ? pageContext.textSample : '';
+          children = blocksFromTextSample(sample);
         }
         dbgBg('SAVE_TO_NOTION: prepared children blocks', children.length, sanitizeForLog(children));
         // Append uploaded images (from popup) as blocks

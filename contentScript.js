@@ -166,9 +166,9 @@ function collectPageContext() {
     articleBlocks = convertArticleHtmlToBlocks(article.html);
   }
 
-  // Only compute a paragraph sample if there's no article
+  // Always compute a paragraph sample (first 10 paragraphs) so background can use it based on DB settings
   let textSample;
-  if (!article) {
+  {
     const paragraphs = Array.from(document.querySelectorAll('article p, main p, p')).slice(0, 10);
     textSample = paragraphs
       .map((p) => p.innerText.trim())

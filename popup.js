@@ -122,25 +122,18 @@ async function save() {
       }
     );
   })(context);
-  // Toggle visibility/availability of the article save option based on detection
-  const saveArticleToggle = document.getElementById('saveArticleToggle');
+  // Determine if article exists (UI no longer shows a toggle)
   const hasArticle = !!context?.article?.html || !!context?.article?.text;
-  if (saveArticleToggle) {
-    const wrapper = saveArticleToggle.closest('div.row') || saveArticleToggle.parentElement?.parentElement;
-    if (wrapper) wrapper.style.display = hasArticle ? 'flex' : 'none';
-    saveArticleToggle.checked = hasArticle ? true : false;
-  }
 
   status.textContent = 'Analyzing content with GPT-5 Nano and saving to Notion...';
   console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Got page context. Sending SAVE_TO_NOTION…`);
   const note = document.getElementById('note').value.trim();
-  const saveArticle = !!document.getElementById('saveArticleToggle')?.checked && hasArticle;
+  // Do not send UI-controlled saveArticle flag; background will use per-DB settings.
   const res = await chrome.runtime.sendMessage({
     type: 'SAVE_TO_NOTION',
     databaseId,
     pageContext: context,
     note,
-    saveArticle,
     startedAt
   });
   if (!res?.ok) {
