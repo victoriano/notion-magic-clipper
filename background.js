@@ -491,7 +491,7 @@ function buildPromptForProperties(schema, pageContext, customInstructions) {
         `\nPage context:\n${contextStr}`,
         '\n\nInstructions:',
         '- Fill as many properties as possible based on the context.',
-        '- There must be exactly one "title" property and you must set it to the best possible title.',
+        '- There must be exactly one "title" property and you must set it to the best possible title. From the name of the database infer if those should be names of people, companies, movies, recipes etc. Remove any reference in the titles that to the sources, make them as clean as possible.',
         '- For select/multi_select: use existing options by exact name. Do NOT create new options by default. Only propose new options if the custom database instructions explicitly allow creating options. If no clear match exists and creation is not allowed, omit the property.',
         '- If a property name suggests an image (e.g., "Poster", "Cover", "Thumbnail", "Artwork", "Image", "Screenshot") and the page context contains an image URL (e.g., og:image or twitter:image), prefer filling that property with the image URL. If the database uses a files property, use the Notion files property shape with an external URL. Optionally, also add an image block to children using the same URL.',
         '- When choosing among multiple images, prefer medium-to-large content images (avoid tiny icons/sprites). As a heuristic, prioritize images where width or height ≥ 256px and de-prioritize those < 64px. Use the collected image context (alt text, nearest heading, parent text, classes, and any width/height or rendered sizes) to decide.',
