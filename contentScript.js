@@ -120,6 +120,7 @@ function collectPageContext() {
       linkText: textTrim(img.closest('a')?.innerText || ''),
       parentText: textTrim(img.parentElement?.innerText || ''),
       classes: textTrim(img.className, 160),
+      parentClasses: textTrim(img.parentElement?.className, 160),
       tag: img.tagName
     };
     if (img.src) addImage(img.src, baseCtx);
@@ -139,6 +140,7 @@ function collectPageContext() {
       alt: textTrim(imgAlt),
       nearestHeading: findNearestHeading(s),
       parentText: textTrim(s.parentElement?.innerText || ''),
+      parentClasses: textTrim(s.parentElement?.className || picture?.className, 160),
       tag: s.tagName
     };
     const ss = s.getAttribute('srcset');
@@ -163,6 +165,7 @@ function collectPageContext() {
           nearestHeading: findNearestHeading(el),
           parentText: textTrim(el.innerText || el.textContent || ''),
           classes: textTrim(el.className, 160),
+          parentClasses: textTrim(el.parentElement?.className, 160),
           tag: el.tagName
         });
       }

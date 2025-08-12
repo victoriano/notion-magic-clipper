@@ -160,26 +160,47 @@ async function uploadExternalImageToNotion(imageUrl) {
     const urlObj = new URL(normalized, location.href);
     const pathname = urlObj.pathname || '';
     const base = pathname.split('/').pop() || 'image';
-    const guessedName = base.includes('.') ? base : base + '.png';
+    function extensionForMime(mime) {
+      if (!mime) return null;
+      const m = mime.toLowerCase();
+      if (m === 'image/jpeg' || m === 'image/jpg') return '.jpg';
+      if (m === 'image/png') return '.png';
+      if (m === 'image/webp') return '.webp';
+      if (m === 'image/gif') return '.gif';
+      if (m === 'image/svg+xml') return '.svg';
+      if (m === 'image/heic') return '.heic';
+      if (m === 'image/heif') return '.heif';
+      return null;
+    }
     dbgBg('UPLOAD: fetching external image', { original: redactUrl(imageUrl), normalized: redactUrl(normalized) });
     const resp = await fetch(normalized, { mode: 'cors' });
     if (!resp.ok) throw new Error(`fetch ${resp.status}`);
     const blob = await resp.blob();
     // Guard: 20MB single-part limit (approx)
     if (blob.size > 20 * 1024 * 1024) throw new Error('image too large (>20MB)');
-    const { file_upload_id, upload_url, upload_headers, upload_fields } = await startFileUpload(guessedName);
+    // Choose filename that matches the blob MIME type to avoid Notion content-type mismatch
+    const mimeExt = extensionForMime(blob.type) || '.bin';
+    let filename = base;
+    if (!/\.[A-Za-z0-9]+$/.test(filename)) filename += mimeExt;
+    else {
+      const currentExt = filename.slice(filename.lastIndexOf('.'));
+      if (mimeExt && currentExt.toLowerCase() !== mimeExt) filename = filename.replace(/\.[A-Za-z0-9]+$/, mimeExt);
+    }
+    const { file_upload_id, upload_url, upload_headers, upload_fields } = await startFileUpload(filename);
     dbgBg('UPLOAD: started', {
       file_upload_id,
       upload_url: redactUrl(upload_url),
       upload_headers: upload_headers ? Object.keys(upload_headers) : [],
-      upload_fields: upload_fields ? Object.keys(upload_fields) : []
+      upload_fields: upload_fields ? Object.keys(upload_fields) : [],
+      blobType: blob.type,
+      filename
     });
     let up;
     if (upload_fields && typeof upload_fields === 'object') {
       // S3 POST policy style: we must include provided fields before the file
       const fd = new FormData();
       for (const [k, v] of Object.entries(upload_fields)) fd.append(k, v);
-      const file = new File([blob], guessedName, { type: blob.type || 'application/octet-stream' });
+      const file = new File([blob], filename, { type: blob.type || 'application/octet-stream' });
       fd.append('file', file);
       const postHeaders = {};
       if (upload_headers && typeof upload_headers === 'object') {
@@ -197,11 +218,15 @@ async function uploadExternalImageToNotion(imageUrl) {
       if (targetHost.endsWith('notion.com')) {
         // Notion expects multipart/form-data POST with 'file'
         const fd = new FormData();
-        const file = new File([blob], guessedName, { type: blob.type || 'application/octet-stream' });
+        const file = new File([blob], filename, { type: blob.type || 'application/octet-stream' });
         fd.append('file', file);
         const postHeaders = {};
         if (upload_headers && typeof upload_headers === 'object') {
-          for (const [k, v] of Object.entries(upload_headers)) postHeaders[k] = v;
+          for (const [k, v] of Object.entries(upload_headers)) {
+            // Avoid overriding multipart boundary; also avoid forcing a mismatched Content-Type
+            if (String(k).toLowerCase() === 'content-type') continue;
+            postHeaders[k] = v;
+          }
         }
         // Notion upload endpoint requires auth/version even if not listed in upload_headers
         try {
@@ -271,18 +296,23 @@ async function materializeExternalImagesInPropsAndBlocks(db, props, blocks, { ma
     props[propName] = { files: out };
   }
 
-  // Convert image blocks
-  for (const b of blocks) {
+  // Convert image blocks and drop invalid external URLs
+  const toRemove = [];
+  for (let i = 0; i < blocks.length; i++) {
+    const b = blocks[i];
     if (!b || b.type !== 'image') continue;
-      const ext = b.image?.external?.url || b.url;
+    const ext = b.image?.external?.url || b.url;
     if (typeof ext === 'string') {
       const up = await tryUpload(ext);
       if (up) {
         const fid = up.file_upload_id || up.id;
-        b.image = { file_upload: { id: fid, file_upload_id: fid } };
+        b.image = { file_upload: { id: fid } };
+      } else {
+        toRemove.push(i);
       }
     }
   }
+  for (let j = toRemove.length - 1; j >= 0; j--) blocks.splice(toRemove[j], 1);
 }
 
 // Record a recent successful save for display in the popup history
@@ -580,7 +610,7 @@ function sanitizeBlocks(rawBlocks) {
     }
     if (type === 'image') {
       const url = b?.image?.external?.url || b?.url;
-      const uploadId = b?.image?.file_upload?.file_upload_id || b?.file_upload_id;
+      const uploadId = b?.image?.file_upload?.id || b?.image?.file_upload?.file_upload_id || b?.file_upload_id;
       if (typeof url === 'string' && url) {
         out.push({ object: 'block', type: 'image', image: { external: { url } } });
         continue;

@@ -85,10 +85,19 @@ Options (options.html/js)
 11) background → Popup `ok: true` + created page
 
 ### Start file upload (direct upload, small files)
-1) UI (future) or script sends `START_FILE_UPLOAD` with `filename`
-2) background `POST /v1/file_uploads { mode: single_part, filename }` → `{ file_upload_id, upload_url }`
-3) UI uploads bytes to `upload_url` (multipart/form‑data)
-4) On successful upload, UI passes `attachments: [{ file_upload_id }]` into `SAVE_TO_NOTION`
+There are two supported paths:
+
+- Background‑managed (automatic when external image URLs are found):
+  1) background calls `POST /v1/file_uploads { mode: "single_part", filename }`
+  2) Notion returns an upload contract `{ id, upload_url, upload_headers?, upload_fields? }`
+  3) background uploads bytes to `upload_url` using one of the strategies below (see “Image support and direct uploads”)
+  4) background replaces the external URL with `file_upload: { id }` in blocks and files properties
+
+- UI‑managed (optional/future):
+  1) UI sends `START_FILE_UPLOAD` with `filename`
+  2) background returns the contract `{ id, upload_url, ... }`
+  3) UI uploads and later calls `SAVE_TO_NOTION` with `attachments: [{ file_upload_id: id }]`
+  4) background places those as image blocks or in a files property
 
 ---
 
@@ -155,20 +164,40 @@ Properties are mapped strictly by schema type. Examples:
 - `date` → `{ date: { start, end?, time_zone? } }`
 
 Blocks are reduced to a safe subset; strings are converted to paragraph rich_text. Image blocks accept:
-- `{ image: { external: { url } } }` or `{ image: { file_upload: { file_upload_id } } }`
+- `{ image: { external: { url } } }` or `{ image: { file_upload: { id } } }` (Note: Notion requires `file_upload.id` for blocks; `file_upload_id` is rejected.)
 
 ---
 
 ## Image support and direct uploads
 
-Two paths:
-1) External URL (recommended when `og:image`/`twitter:image` exists)
-   - Property fill for files property with external URL
-   - Optional image block using external URL
-2) Direct upload (≤ 20 MB single‑part)
-   - `START_FILE_UPLOAD` → `{ file_upload_id, upload_url }`
-   - UI uploads bytes to `upload_url` (multipart/form‑data)
-   - Include `{ attachments: [{ file_upload_id }] }` in `SAVE_TO_NOTION` → image blocks added before children
+Pipeline used during `SAVE_TO_NOTION` (background‑managed):
+
+1) Candidate discovery
+   - The content script collects image URLs (from `img`, `source[srcset]`, CSS background images, `og:image`, `twitter:image`).
+   - The LLM may also output image blocks or files properties with external URLs.
+
+2) Materialization step
+   - background runs `materializeExternalImagesInPropsAndBlocks(db, props, blocks, { maxUploads: 6 })`.
+   - For each external image URL (capped at 6):
+     - Normalize Notion proxy URLs (`/image/...`) to the original source.
+     - `startFileUpload(filename)` → `{ id, upload_url, upload_headers?, upload_fields? }`.
+     - Choose upload strategy:
+       - If `upload_fields` present: POST multipart/form‑data including all fields, then `file` part.
+       - Else if host ends with `notion.com`: POST multipart/form‑data with `file` and headers `Authorization: Bearer <token>` + `Notion-Version` plus any `upload_headers`.
+       - Else: PUT raw bytes to signed URL with `Content-Type` and any `upload_headers`.
+     - On success, we return `{ id }`.
+
+3) Replacement rules
+   - Files properties: each item becomes `{ name, file_upload: { id } }` (ensure `name`; guess from URL if missing).
+   - Image blocks: replaced with `{ image: { file_upload: { id } } }`.
+   - Final sanitizer removes forbidden fields (e.g., `file_upload.file_upload_id`) from blocks before `POST /pages`.
+
+4) Limits and fallback
+   - Single‑part uploads up to ~20 MB. At most 6 uploads per save.
+   - If an upload fails, we keep the original external URL for that item.
+
+5) Logging
+   - Detailed logs: original/normalized URL, contract keys, and the branch used (`POST-policy`, `POST-notion`, or `PUT`), including response snippets on failure.
 
 Reference: Notion files & media guide – direct upload, supported types, and limits.
 
