@@ -832,6 +832,40 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return [{ type: 'text', text: { content } }];
           }
 
+          function sanitizeRichTextArray(arr) {
+            const out = [];
+            const MAX = 20;
+            function make(text, linkUrl) {
+              const content = String(text || '').slice(0, 2000);
+              const base = { type: 'text', text: { content } };
+              if (linkUrl && typeof linkUrl === 'string') {
+                base.text.link = { url: linkUrl };
+              }
+              return base;
+            }
+            for (const it of Array.isArray(arr) ? arr : []) {
+              if (out.length >= MAX) break;
+              if (typeof it === 'string') { out.push(make(it)); continue; }
+              if (it && typeof it === 'object') {
+                if (it.type === 'text' && it.text && typeof it.text.content === 'string') {
+                  const linkUrl = it.text.link?.url || it.href || (typeof it.text.link === 'string' ? it.text.link : undefined);
+                  out.push(make(it.text.content, linkUrl));
+                  continue;
+                }
+                if (typeof it.plain_text === 'string') {
+                  out.push(make(it.plain_text, it.href));
+                  continue;
+                }
+                if (typeof it.content === 'string') {
+                  out.push(make(it.content));
+                  continue;
+                }
+              }
+            }
+            if (out.length === 0) out.push(make(''));
+            return out;
+          }
+
           function guessNameFromUrl(u, fallback = 'file') {
             try {
               const url = new URL(u);
@@ -846,17 +880,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             if (value == null) return undefined;
             switch (type) {
               case 'title': {
-                if (Array.isArray(value?.title)) return { title: value.title };
+                if (Array.isArray(value?.title)) return { title: sanitizeRichTextArray(value.title) };
                 if (typeof value === 'string') return { title: toRichText(value) };
                 if (typeof value?.text === 'string') return { title: toRichText(value.text) };
-                if (Array.isArray(value)) return { title: value };
+                if (Array.isArray(value)) return { title: sanitizeRichTextArray(value) };
                 return undefined;
               }
               case 'rich_text': {
-                if (Array.isArray(value?.rich_text)) return { rich_text: value.rich_text };
+                if (Array.isArray(value?.rich_text)) return { rich_text: sanitizeRichTextArray(value.rich_text) };
                 if (typeof value === 'string') return { rich_text: toRichText(value) };
                 if (typeof value?.text === 'string') return { rich_text: toRichText(value.text) };
-                if (Array.isArray(value)) return { rich_text: value };
+                if (Array.isArray(value)) return { rich_text: sanitizeRichTextArray(value) };
                 return undefined;
               }
               case 'url': {
