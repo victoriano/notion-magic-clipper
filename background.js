@@ -648,7 +648,7 @@ function sanitizeBlocks(rawBlocks) {
       continue;
     }
     const field = b[type];
-    const txt = field?.rich_text || b.text || b.content || '';
+    const txt = field?.rich_text || field?.text || b.text || b.content || '';
     out.push({ object: 'block', type, [type]: { rich_text: Array.isArray(txt) ? txt : toRichText(txt) } });
   }
   return out;
@@ -1091,11 +1091,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             children = sanitizeBlocks(parsed.children || parsed.blocks || parsed.content || []);
           }
           // If DB requires content customization and we used article blocks, run a second pass to transform children
-          if (children.length && customizeContent && contentPrompt) {
-            dbgBg('SAVE_TO_NOTION: content customization starting', { inCount: children.length, contentPromptLen: contentPrompt.length });
+          if (customizeContent && contentPrompt && typeof pageContext?.article?.html === 'string' && pageContext.article.html.length > 0) {
+            const htmlForTransform = pageContext.article.html;
+            dbgBg('SAVE_TO_NOTION: content customization starting', { articleHtmlLen: htmlForTransform.length, contentPromptLen: contentPrompt.length });
             const transformMessages = [
-              { role: 'system', content: 'You are an assistant that rewrites Notion block content. Return only a JSON array of Notion blocks (same structure), transformed per the instructions.' },
-              { role: 'user', content: `Original children blocks (JSON array):\n${JSON.stringify(children).slice(0, 200000)}` },
+              { role: 'system', content: [
+                'You convert ARTICLE HTML into a JSON array of Notion blocks according to the user instructions.',
+                'Output rules:',
+                '- Return ONLY a raw JSON array (no wrapper object, no code fences).',
+                '- Allowed block types: paragraph, heading_1, heading_2, heading_3, bulleted_list_item, numbered_list_item, quote, image.',
+                '- For text blocks use simple rich_text with plain text only (no annotations).',
+                '- For image blocks use the external URL shape only.',
+                '- Do NOT include fields like object, id, children, created_time, annotations, etc.',
+                'Examples:',
+                '[',
+                '  {"type":"heading_2","heading_2":{"rich_text":[{"type":"text","text":{"content":"Section title"}}]}},',
+                '  {"type":"paragraph","paragraph":{"rich_text":[{"type":"text","text":{"content":"One or two sentences explaining the section."}}]}},',
+                '  {"type":"bulleted_list_item","bulleted_list_item":{"rich_text":[{"type":"text","text":{"content":"Key point"}}]}},',
+                '  {"type":"numbered_list_item","numbered_list_item":{"rich_text":[{"type":"text","text":{"content":"Step 1"}}]}},',
+                '  {"type":"quote","quote":{"rich_text":[{"type":"text","text":{"content":"Quoted insight."}}]}},',
+                '  {"type":"image","image":{"external":{"url":"https://example.com/image.jpg"}}}',
+                ']' 
+              ].join(' ') },
+              { role: 'user', content: `Article HTML:\n${htmlForTransform}` },
               { role: 'user', content: `Transform instructions:\n${contentPrompt}` }
             ];
             try {
@@ -1103,12 +1121,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               function buildTransformViewer(messages) {
                 return messages.map((m) => {
                   if (typeof m?.content !== 'string') return m;
-                  const m1 = 'Original children blocks (JSON array):\n';
+                  const m1 = 'Article HTML:\n';
                   const m2 = 'Transform instructions:\n';
                   if (m.content.startsWith(m1)) {
-                    const arrStr = m.content.slice(m1.length);
-                    const arrObj = safeParseJSON(arrStr.trim());
-                    return { role: m.role, children: Array.isArray(arrObj) ? arrObj : arrStr };
+                    const htmlStr = m.content.slice(m1.length);
+                    return { role: m.role, articleHtmlLen: htmlStr.length, articleHtmlPreview: htmlStr.slice(0, 10000) };
                   }
                   if (m.content.startsWith(m2)) {
                     const instr = m.content.slice(m2.length).trim().split(/\n+/).filter(Boolean);
@@ -1126,8 +1143,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             try {
               const transformed = await openaiChat(transformMessages, { model: GPT5_NANO_MODEL, reasoning_effort: openai_reasoning_effort || 'low', verbosity: openai_verbosity || 'low' });
               try { dbgBg('SAVE_TO_NOTION: content customization raw', transformed.slice(0, 2000)); } catch {}
-              const parsedTransformed = extractJsonObject(transformed) || JSON.parse(transformed);
-              const safeTransformed = sanitizeBlocks(Array.isArray(parsedTransformed) ? parsedTransformed : (parsedTransformed?.children || []));
+              // Allow either a pure array or { children: [...] } shapes
+              const tTrim = typeof transformed === 'string' ? transformed.trim() : '';
+              let parsedTransformed = null;
+              if (tTrim.startsWith('[')) {
+                // Fast path for arrays
+                try { parsedTransformed = JSON.parse(tTrim); } catch {}
+              }
+              if (!parsedTransformed) parsedTransformed = extractJsonObject(transformed);
+              if (!parsedTransformed) {
+                try { parsedTransformed = JSON.parse(transformed); } catch {}
+              }
+              if (Array.isArray(parsedTransformed)) {
+                // ok
+              } else if (parsedTransformed && Array.isArray(parsedTransformed.children)) {
+                parsedTransformed = parsedTransformed.children;
+              } else {
+                // Try to recover from fenced JSON arrays
+                const fence = transformed.match(/```(?:json)?\n([\s\S]*?)\n```/i);
+                if (fence) {
+                  try {
+                    const arr = JSON.parse(fence[1]);
+                    if (Array.isArray(arr)) parsedTransformed = arr;
+                  } catch {}
+                }
+              }
+              try {
+                dbgBg('SAVE_TO_NOTION: content customization response (viewer json)', JSON.stringify(parsedTransformed, null, 2));
+                if (!debugReport.customization) debugReport.customization = { used: true };
+                debugReport.customization.responseViewer = parsedTransformed;
+              } catch {}
+              const safeTransformed = sanitizeBlocks(Array.isArray(parsedTransformed) ? parsedTransformed : []);
               if (Array.isArray(safeTransformed) && safeTransformed.length) {
                 children = safeTransformed;
                 replacedViaModel = true;
