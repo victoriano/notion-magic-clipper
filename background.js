@@ -498,30 +498,33 @@ function buildPromptForProperties(schema, pageContext, customInstructions, { use
     }
   }
 
-  const baseContext = { url, title, meta, selectionText, headings, listItems, shortSpans, attrTexts, images };
-  if (useArticle) Object.assign(baseContext, { article });
+  // Build a slimmer context when article is present
+  let baseContext;
+  if (useArticle && article) {
+    baseContext = {
+      url,
+      title,
+      meta,
+      selectionText,
+      article: { title: article.title, text: article.text },
+      images
+    };
+  } else {
+    baseContext = { url, title, meta, selectionText, headings, listItems, shortSpans, attrTexts, images };
+  }
+  if (useArticle && !article) {
+    // If useArticle requested but no article, keep non-article context
+  }
   if (effectiveTextSample) Object.assign(baseContext, { textSample: effectiveTextSample });
   const contextStr = JSON.stringify(baseContext, null, 2);
   const messages = [
     {
       role: 'system',
-      content: (
-        useArticle
-          ? [
-              'You are an assistant that generates both Notion PROPERTIES and CONTENT from a database schema and page context.',
-              'Return only VALID JSON shaped as { "properties": { ... }, "children": [ ... ] }.',
-              '- "properties": must use the exact Notion API structure and respect the provided schema types.',
-              '- "children": MUST be present and be a list of Notion blocks using ONLY: paragraph, heading_1, heading_2, heading_3, bulleted_list_item, numbered_list_item, quote, bookmark, image.',
-              'Use simple rich_text with plain text in each block; do not include comments or text outside the JSON.',
-              'When pageContext.article is present, you MUST set children to the article content converted into Notion blocks. Prefer article.html to preserve structure (map h1–h3 to heading_1–heading_3, p to paragraph, ul/li to bulleted_list_item, ol/li to numbered_list_item, blockquote to quote); fall back to article.text if needed. Only deviate if the database-specific custom instructions explicitly instruct otherwise.'
-            ].join(' ')
-          : [
-              'You are an assistant that generates Notion PROPERTIES only from a database schema and page context.',
-              'Return only VALID JSON shaped as { "properties": { ... } } (do NOT include "children").',
-              '- "properties": must use the exact Notion API structure and respect the provided schema types.',
-              'Do NOT use pageContext.article. Use only textSample/headings/metadata to determine properties.'
-            ].join(' ')
-      )
+      content: [
+        'You are an assistant that generates Notion PROPERTIES only from a database schema and page context.',
+        'Return only VALID JSON shaped as { "properties": { ... } } (do NOT include "children").',
+        '- "properties": must use the exact Notion API structure and respect the provided schema types.'
+      ].join(' ')
     },
     {
       role: 'user',
@@ -538,15 +541,7 @@ function buildPromptForProperties(schema, pageContext, customInstructions, { use
         '- For url, set the page URL if an appropriate property exists.',
         '- Omit properties you cannot determine (do not invent values).',
         '- Do NOT include read-only properties (rollup, created_time, etc.).',
-        ...(useArticle
-          ? [
-              '- Always generate "children". If pageContext.article exists, convert the article content into Notion blocks (see mapping above) and include it as the page content.',
-              '- Return ONLY one JSON object shaped as { "properties": { ... }, "children"?: [ ... ] }.'
-            ]
-          : [
-              '- Do NOT generate "children". Return ONLY one JSON object shaped as { "properties": { ... } }.'
-            ]
-        )
+        '- Do NOT generate "children". Return ONLY one JSON object shaped as { "properties": { ... } }.'
       ].join('\n')
     }
   ];
@@ -768,6 +763,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (!databaseId) throw new Error('databaseId faltante');
         if (!pageContext) throw new Error('pageContext faltante');
         dbgBg('SAVE_TO_NOTION: start', { databaseId, url: pageContext?.url });
+        const debugReport = { t: new Date().toISOString(), databaseId, pageUrl: pageContext?.url || '' };
+        // Log Readability raw HTML (separately) for quick inspection
+        try {
+          const artHtml = pageContext?.article?.html || '';
+          if (typeof artHtml === 'string' && artHtml.length > 0) {
+            dbgBg('READABILITY_HTML: length', artHtml.length);
+            try {
+              const dataUrl = 'data:text/plain;charset=utf-8,' + encodeURIComponent(artHtml);
+              dbgBg('READABILITY_HTML: data URL (open to view/copy full source)', dataUrl);
+            } catch {}
+            debugReport.readabilityHtmlLen = artHtml.length;
+            debugReport.readabilityHtmlSample = artHtml.slice(0, 20000);
+          }
+        } catch {}
 
         const db = await getDatabase(databaseId);
         dbgBg('SAVE_TO_NOTION: fetched database schema');
@@ -779,6 +788,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const customInstructions = (settingsForDb.prompt ?? legacyPrompt) || '';
         const saveArticleFlag = settingsForDb.saveArticle !== false; // default true per DB
         const effectiveSaveArticle = (typeof saveArticle === 'boolean' ? saveArticle : saveArticleFlag);
+        const customizeContent = settingsForDb.customizeContent === true;
+        const contentPrompt = typeof settingsForDb.contentPrompt === 'string' ? settingsForDb.contentPrompt.trim() : '';
+        const promptMode = effectiveSaveArticle ? 'article+children' : 'properties-only';
+        dbgBg('SAVE_TO_NOTION: mode', { promptMode });
+        debugReport.settings = {
+          promptMode,
+          saveArticleFlag,
+          effectiveSaveArticle,
+          customizeContent,
+          contentPromptLen: contentPrompt.length,
+          hasArticle: !!pageContext.article,
+          articleBlocks: Array.isArray(pageContext.articleBlocks) ? pageContext.articleBlocks.length : 0,
+          textSampleLen: typeof pageContext.textSample === 'string' ? pageContext.textSample.length : 0
+        };
         const prompt = buildPromptForProperties(schemaForLLM, pageContext, customInstructions, { useArticle: effectiveSaveArticle });
         dbgBg('SAVE_TO_NOTION: db settings', {
           databaseId,
@@ -792,10 +815,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         dbgBg('SAVE_TO_NOTION: prompt (messages)', sanitizeForLog(prompt));
         try {
           dbgBg('SAVE_TO_NOTION: prompt (full object)', prompt);
-          dbgBg('SAVE_TO_NOTION: prompt (json)', JSON.stringify(prompt, null, 2));
+          // Also log a viewer-friendly JSON without \n escapes by structuring user content
+          function safeParseJSON(s) { try { return JSON.parse(s); } catch { return null; } }
+          function buildViewer(messages) {
+            return messages.map((m) => {
+              if (typeof m?.content !== 'string') return m;
+              const markerA = 'Database schema (properties):\n';
+              const markerB = '\n\nPage context:\n';
+              const markerC = '\n\nInstructions:';
+              const iA = m.content.indexOf(markerA);
+              const iB = m.content.indexOf(markerB);
+              const iC = m.content.indexOf(markerC);
+              if (iA >= 0 && iB > iA && iC > iB) {
+                const schemaStr = m.content.slice(iA + markerA.length, iB);
+                const ctxStr = m.content.slice(iB + markerB.length, iC);
+                const instrStr = m.content.slice(iC + markerC.length);
+                const schemaObj = safeParseJSON(schemaStr.trim());
+                const ctxObj = safeParseJSON(ctxStr.trim());
+                const instructions = instrStr.trim().split(/\n+/).map((s) => s.replace(/^[-•]\s*/, '').trim()).filter(Boolean);
+                return { role: m.role, content_view: { schema: schemaObj ?? schemaStr, pageContext: ctxObj ?? ctxStr, instructions } };
+              }
+              // Fallback: split content into lines to remove explicit \n sequences
+              return { role: m.role, content_lines: m.content.split('\n') };
+            });
+          }
+          const viewer = buildViewer(prompt);
+          dbgBg('SAVE_TO_NOTION: prompt (viewer json)', JSON.stringify(viewer, null, 2));
+          debugReport.promptMessagesViewer = viewer;
         } catch (e) {
           dbgBg('SAVE_TO_NOTION: prompt logging error', String(e?.message || e));
         }
+        debugReport.promptMessages = prompt;
 
         const content = await openaiChat(prompt, {
           model: GPT5_NANO_MODEL,
@@ -803,6 +853,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           verbosity: openai_verbosity || 'low'
         });
         dbgBg('SAVE_TO_NOTION: received LLM content');
+        debugReport.mainRaw = typeof content === 'string' ? content.slice(0, 200000) : '';
 
         // Parse JSON block from content (robust extractor)
         const parsed = extractJsonObject(content);
@@ -810,6 +861,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           throw new Error('The model did not return valid JSON for properties.');
         }
         dbgBg('SAVE_TO_NOTION: parsed JSON', sanitizeForLog(parsed));
+        try {
+          dbgBg('SAVE_TO_NOTION: response (viewer json)', JSON.stringify(parsed, null, 2));
+          debugReport.mainParsedViewer = parsed;
+        } catch {}
+        try { debugReport.mainParsedChildrenCount = (Array.isArray(parsed?.children) ? parsed.children.length : (Array.isArray(parsed?.blocks) ? parsed.blocks.length : (Array.isArray(parsed?.content) ? parsed.content.length : 0))); } catch {}
 
         if (!parsed || typeof parsed !== 'object' || !parsed.properties) {
           throw new Error('Falta la clave "properties" en la salida del modelo.');
@@ -1034,9 +1090,112 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           } else if (parsed && (parsed.children || parsed.blocks || parsed.content)) {
             children = sanitizeBlocks(parsed.children || parsed.blocks || parsed.content || []);
           }
+          // If DB requires content customization and we used article blocks, run a second pass to transform children
+          if (children.length && customizeContent && contentPrompt) {
+            dbgBg('SAVE_TO_NOTION: content customization starting', { inCount: children.length, contentPromptLen: contentPrompt.length });
+            const transformMessages = [
+              { role: 'system', content: 'You are an assistant that rewrites Notion block content. Return only a JSON array of Notion blocks (same structure), transformed per the instructions.' },
+              { role: 'user', content: `Original children blocks (JSON array):\n${JSON.stringify(children).slice(0, 200000)}` },
+              { role: 'user', content: `Transform instructions:\n${contentPrompt}` }
+            ];
+            try {
+              function safeParseJSON(s) { try { return JSON.parse(s); } catch { return null; } }
+              function buildTransformViewer(messages) {
+                return messages.map((m) => {
+                  if (typeof m?.content !== 'string') return m;
+                  const m1 = 'Original children blocks (JSON array):\n';
+                  const m2 = 'Transform instructions:\n';
+                  if (m.content.startsWith(m1)) {
+                    const arrStr = m.content.slice(m1.length);
+                    const arrObj = safeParseJSON(arrStr.trim());
+                    return { role: m.role, children: Array.isArray(arrObj) ? arrObj : arrStr };
+                  }
+                  if (m.content.startsWith(m2)) {
+                    const instr = m.content.slice(m2.length).trim().split(/\n+/).filter(Boolean);
+                    return { role: m.role, instructions: instr };
+                  }
+                  return { role: m.role, content_lines: m.content.split('\n') };
+                });
+              }
+              const cviewer = buildTransformViewer(transformMessages);
+              dbgBg('SAVE_TO_NOTION: content customization prompt (viewer json)', JSON.stringify(cviewer, null, 2));
+              if (!debugReport.customization) debugReport.customization = { used: true };
+              debugReport.customization.promptViewer = cviewer;
+            } catch {}
+            let replacedViaModel = false;
+            try {
+              const transformed = await openaiChat(transformMessages, { model: GPT5_NANO_MODEL, reasoning_effort: openai_reasoning_effort || 'low', verbosity: openai_verbosity || 'low' });
+              try { dbgBg('SAVE_TO_NOTION: content customization raw', transformed.slice(0, 2000)); } catch {}
+              const parsedTransformed = extractJsonObject(transformed) || JSON.parse(transformed);
+              const safeTransformed = sanitizeBlocks(Array.isArray(parsedTransformed) ? parsedTransformed : (parsedTransformed?.children || []));
+              if (Array.isArray(safeTransformed) && safeTransformed.length) {
+                children = safeTransformed;
+                replacedViaModel = true;
+              }
+              try { dbgBg('SAVE_TO_NOTION: content customization parsed (first block)', Array.isArray(children) && children[0] ? sanitizeForLog(children[0]) : null); } catch {}
+              dbgBg('SAVE_TO_NOTION: content customization done', { outCount: children.length });
+              debugReport.customization = {
+                used: true,
+                transformMessages,
+                raw: typeof transformed === 'string' ? transformed.slice(0, 200000) : '',
+                outCount: children.length,
+                replacedViaModel
+              };
+            } catch (e) {
+              dbgBg('Content customization failed (using original article blocks)', String(e?.message || e));
+              debugReport.customization = { used: true, error: String(e?.message || e) };
+            }
+
+            // Fallback: if model returned no blocks, keep only images and add a short summary paragraph
+            if (!children || !Array.isArray(children) || children.length === 0 || (debugReport.customization && debugReport.customization.replacedViaModel === false)) {
+              const imageOnly = (Array.isArray(pageContext.articleBlocks) ? sanitizeBlocks(pageContext.articleBlocks) : children || [])
+                .filter((b) => b && b.type === 'image')
+                .slice(0, 8);
+              let summaryBlocks = [];
+              try {
+                const contextText = (pageContext.article?.text || pageContext.textSample || '').slice(0, 4000);
+                const summaryMessages = [
+                  { role: 'system', content: 'Return only a JSON array with a single Notion paragraph block that briefly explains why this insight matters now. Use neutral, concise language (1-2 sentences).' },
+                  { role: 'user', content: `Context:\n${contextText}` },
+                  { role: 'user', content: `Additional instructions for the paragraph:\n${contentPrompt}` }
+                ];
+                const resp = await openaiChat(summaryMessages, { model: GPT5_NANO_MODEL, reasoning_effort: openai_reasoning_effort || 'low', verbosity: openai_verbosity || 'low' });
+                const parsedSummary = extractJsonObject(resp) || JSON.parse(resp);
+                const safeSummary = sanitizeBlocks(Array.isArray(parsedSummary) ? parsedSummary : (parsedSummary?.children || []));
+                if (Array.isArray(safeSummary) && safeSummary.length) summaryBlocks = safeSummary.slice(0, 1);
+              } catch {}
+              if (summaryBlocks.length === 0) {
+                summaryBlocks = [{ object: 'block', type: 'paragraph', paragraph: { rich_text: [{ type: 'text', text: { content: 'Summary unavailable.' } }] } }];
+              }
+              children = imageOnly.concat(summaryBlocks);
+              dbgBg('SAVE_TO_NOTION: customization fallback applied', { images: imageOnly.length, summary: summaryBlocks.length });
+              if (debugReport.customization) {
+                debugReport.customization.fallbackUsed = true;
+                debugReport.customization.fallbackImages = imageOnly.length;
+              }
+            }
+          }
           // When article is disabled, we intentionally ignore any children returned by the model
           // and do not synthesize blocks from textSample.
         }
+
+        // Snapshot for debugging (easy to copy/paste)
+        const modelChildrenCount = parsed ? ((Array.isArray(parsed.children) && parsed.children.length) || (Array.isArray(parsed.blocks) && parsed.blocks.length) || (Array.isArray(parsed.content) && parsed.content.length) || 0) : 0;
+        const snapshot = {
+          databaseId,
+          pageUrl: pageContext.url || '',
+          promptMode,
+          saveArticleFlag,
+          effectiveSaveArticle,
+          customizeContent,
+          contentPromptLen: contentPrompt.length,
+          hasArticle: !!pageContext.article,
+          articleBlocks: Array.isArray(pageContext.articleBlocks) ? pageContext.articleBlocks.length : 0,
+          textSampleLen: typeof pageContext.textSample === 'string' ? pageContext.textSample.length : 0,
+          modelChildrenCount,
+          chosenChildren: Array.isArray(children) ? children.length : 0
+        };
+        dbgBg('SAVE_TO_NOTION: snapshot', snapshot);
         dbgBg('SAVE_TO_NOTION: prepared children blocks', children.length, sanitizeForLog(children));
         // Append uploaded images (from popup) as blocks
         const attachmentBlocks = Array.isArray(message.attachments)
@@ -1079,6 +1238,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         dbgBg('SAVE_TO_NOTION: creating page in Notion with', { properties: sanitizeForLog(safeProps), children: sanitizeForLog(blocks) });
         // Notion limits initial children to 100; create page with up to 100, then append the rest
         const firstBatch = blocks.slice(0, 100);
+        debugReport.finalChildrenCount = blocks.length;
+        try { debugReport.propertiesKeys = Object.keys(safeProps || {}); } catch {}
         const created = await createPageInDatabase(databaseId, safeProps, firstBatch);
         const t1 = Date.now();
         dbgBg('SAVE_TO_NOTION: page created', sanitizeForLog({ id: created?.id, url: created?.url || created?.public_url, properties: created?.properties }));
@@ -1103,6 +1264,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           : undefined;
         const dbTitle = Array.isArray(db?.title) ? db.title.map((t) => t.plain_text).join('') : '';
         await recordRecentSave({ url: pageUrl, ts: Date.now(), databaseId, databaseTitle: dbTitle, title: finalTitle, sourceUrl: pageContext.url || '', durationMs: t1 - t0 });
+        try { dbgBg('DEBUG_REPORT_JSON', JSON.stringify(debugReport, null, 2)); } catch {}
         sendResponse({ ok: true, page: created });      } catch (e) {
         sendResponse({ ok: false, error: String(e.message || e) });
       }

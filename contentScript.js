@@ -331,7 +331,18 @@ function collectPageContext() {
       }
     } catch {}
   });
-  // Cap images
+  // Deterministic prefilter for images: keep only images where any dimension ≥ 100px
+  (function filterImagesBySize() {
+    function dimOk(entry) {
+      const dims = [entry.width, entry.height, entry.renderedWidth, entry.renderedHeight]
+        .filter((n) => typeof n === 'number' && !Number.isNaN(n));
+      return dims.some((n) => n >= 100);
+    }
+    const keep = images.filter((e) => dimOk(e));
+    images.length = 0;
+    Array.prototype.push.apply(images, keep);
+  })();
+  // Cap images after filtering
   if (images.length > 60) images.length = 60;
 
   return {

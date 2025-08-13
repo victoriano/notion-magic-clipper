@@ -173,7 +173,9 @@ async function syncSettingsWithDatabases(databases) {
     const prev = existingSettings[db.id] || {};
     const prompt = typeof prev.prompt === 'string' ? prev.prompt : (legacyPrompts[db.id] || '');
     const saveArticle = prev.saveArticle !== false; // default true
-    next[db.id] = { prompt, saveArticle };
+    const customizeContent = prev.customizeContent === true; // default false
+    const contentPrompt = typeof prev.contentPrompt === 'string' ? prev.contentPrompt : '';
+    next[db.id] = { prompt, saveArticle, customizeContent, contentPrompt };
   }
   await setDatabaseSettings(next);
   return next;
@@ -190,7 +192,7 @@ function renderAllDatabasesList(container, items, settings) {
     a.textContent = `${emoji ? emoji + ' ' : ''}${db.title}`;
     a.target = '_blank';
     a.rel = 'noopener noreferrer';
-    const current = (settings && settings[db.id]) || { prompt: '', saveArticle: true };
+    const current = (settings && settings[db.id]) || { prompt: '', saveArticle: true, customizeContent: false, contentPrompt: '' };
     const hasPrompt = (current.prompt || '').trim().length > 0;
     const badge = document.createElement('span');
     badge.textContent = hasPrompt ? ' · prompt saved' : '';
@@ -227,6 +229,26 @@ function renderAllDatabasesList(container, items, settings) {
     txt.textContent = 'Save article content as page content (default on)';
     behavior.appendChild(chk);
     behavior.appendChild(txt);
+
+    const customize = document.createElement('label');
+    customize.style.display = (chk.checked ? 'flex' : 'none');
+    customize.style.alignItems = 'center';
+    customize.style.gap = '6px';
+    customize.style.marginTop = '6px';
+    const customizeChk = document.createElement('input');
+    customizeChk.type = 'checkbox';
+    customizeChk.checked = current.customizeContent === true;
+    const customizeTxt = document.createElement('span');
+    customizeTxt.textContent = 'Customize content page';
+    customize.appendChild(customizeChk);
+    customize.appendChild(customizeTxt);
+
+    const contentTa = document.createElement('textarea');
+    contentTa.rows = 3;
+    contentTa.style.width = '100%';
+    contentTa.placeholder = 'Content customization for article children (e.g., write a concise summary with key points, extract pricing table, etc.)';
+    contentTa.value = current.contentPrompt || '';
+    contentTa.style.display = (chk.checked && customizeChk.checked ? 'block' : 'none');
     const actions = document.createElement('div');
     const saveBtn = document.createElement('button');
     saveBtn.textContent = 'Save';
@@ -245,16 +267,25 @@ function renderAllDatabasesList(container, items, settings) {
     actions.appendChild(mini);
     panel.appendChild(ta);
     panel.appendChild(behavior);
+    panel.appendChild(customize);
+    panel.appendChild(contentTa);
     panel.appendChild(actions);
     li.appendChild(panel);
 
     editBtn.addEventListener('click', () => {
       panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
     });
+    chk.addEventListener('change', () => {
+      customize.style.display = chk.checked ? 'flex' : 'none';
+      contentTa.style.display = (chk.checked && customizeChk.checked ? 'block' : 'none');
+    });
+    customizeChk.addEventListener('change', () => {
+      contentTa.style.display = (chk.checked && customizeChk.checked ? 'block' : 'none');
+    });
     saveBtn.addEventListener('click', async () => {
       const text = ta.value.trim();
       const map = await getDatabaseSettings();
-      map[db.id] = { prompt: text, saveArticle: !!chk.checked };
+      map[db.id] = { prompt: text, saveArticle: !!chk.checked, customizeContent: !!customizeChk.checked, contentPrompt: contentTa.value.trim() };
       await setDatabaseSettings(map);
       mini.textContent = 'Saved ✓';
       mini.style.color = '#0b7a0b';
@@ -264,12 +295,16 @@ function renderAllDatabasesList(container, items, settings) {
     clearBtn.addEventListener('click', async () => {
       ta.value = '';
       const map = await getDatabaseSettings();
-      const prev = map[db.id] || { saveArticle: true };
-      map[db.id] = { prompt: '', saveArticle: prev.saveArticle !== false };
+      const prev = map[db.id] || { saveArticle: true, customizeContent: false };
+      map[db.id] = { prompt: '', saveArticle: prev.saveArticle !== false, customizeContent: false, contentPrompt: '' };
       await setDatabaseSettings(map);
       mini.textContent = 'Cleared';
       mini.style.color = '#666';
       badge.textContent = '';
+      customizeChk.checked = false;
+      contentTa.value = '';
+      contentTa.style.display = 'none';
+      customize.style.display = chk.checked ? 'flex' : 'none';
     });
     closeBtn.addEventListener('click', () => {
       panel.style.display = 'none';
