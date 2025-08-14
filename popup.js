@@ -201,10 +201,9 @@ function orderDatabasesByRecentUsage(list, recentSaves, lastDatabaseId) {
 }
 
 async function loadDatabases() {
-  const search = document.getElementById('search');
   console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Loading databases…`);
   const [list, stored] = await Promise.all([
-    listDatabases(search.value.trim()),
+    listDatabases(''),
     getStorage(['recentSaves', 'lastDatabaseId'])
   ]);
   dbList = Array.isArray(list) ? list.slice() : [];
@@ -308,11 +307,7 @@ async function main() {
   await precheck();
   await loadDatabases();
 
-  document.getElementById('refresh').addEventListener('click', loadDatabases);
-  document.getElementById('search').addEventListener('change', async (e) => {
-    await setStorage({ notionSearchQuery: e.target.value });
-    await loadDatabases();
-  });
+  // removed top search/refresh controls
   document.getElementById('save').addEventListener('click', save);
   document.getElementById('openOptions').addEventListener('click', () => chrome.runtime.openOptionsPage());
 

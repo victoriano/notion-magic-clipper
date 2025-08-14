@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Notion Magic Clipper</title>
     <style>
-      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif; margin: 12px; min-width: 300px; }
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif; margin: 12px; min-width: 300px; background: #fff; color: #111; }
       .row { display: flex; gap: 8px; align-items: center; }
       select, input, button, textarea { width: 100%; padding: 6px; font-size: 14px; }
       button { cursor: pointer; }
@@ -28,25 +28,12 @@
       .cbx-check { opacity: 0; }
       .cbx-item[aria-selected="true"] .cbx-check { opacity: 1; }
       .cbx-empty { padding: 10px; color: #666; }
-      @media (prefers-color-scheme: dark) {
-        body { color: #eee; background: #111; }
-        .combobox-trigger { border-color: #333; background: #1a1a1a; color: #eee; }
-        .cbx-dropdown { background: #1a1a1a; border-color: #333; box-shadow: 0 6px 24px rgba(0,0,0,0.5); }
-        .cbx-search-wrapper { border-bottom-color: #2a2a2a; }
-        .cbx-search { background: #111; color: #eee; border-color: #333; }
-        .cbx-item:hover { background: #222; }
-        .cbx-empty { color: #aaa; }
-      }
     </style>
   </head>
   <body>
     <h3 style="margin-top:0">Notion Magic Clipper</h3>
     <div id="precheck"></div>
     <div id="app" style="display:none">
-      <div class="row">
-        <input id="search" placeholder="Search databases (optional)" />
-        <button id="refresh" title="Refresh">🔄</button>
-      </div>
       <div class="row" style="margin-top:8px">
         <div class="combobox" id="dbCombobox">
           <button id="dbComboTrigger" class="combobox-trigger" aria-expanded="false">
