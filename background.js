@@ -611,6 +611,11 @@ function extractSchemaForPrompt(database) {
   const simplified = {};
   Object.entries(props).forEach(([name, def]) => {
     const base = { type: def.type };
+    // Include property description, when available, to improve LLM mapping fidelity
+    try {
+      const desc = typeof def?.description === 'string' ? def.description.trim() : '';
+      if (desc) base.description = desc;
+    } catch {}
     if (def.type === 'select' || def.type === 'multi_select') {
       base.options = def[def.type]?.options?.map((o) => o.name) || [];
     }
