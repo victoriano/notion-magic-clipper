@@ -7,6 +7,7 @@ const NOTION_API_BASE = 'https://api.notion.com/v1';
 const NOTION_VERSION = '2022-06-28'; // latest per Notion docs
 const OPENAI_API_BASE = 'https://api.openai.com/v1';
 const GPT5_NANO_MODEL = 'gpt-5-nano';
+const GOOGLE_GENAI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
 // Debug logging helper
 const DEBUG_LOGS = true;
@@ -44,11 +45,14 @@ async function getConfig() {
       [
         'notionToken',
         'openaiKey',
+        'googleApiKey',
         'notionSearchQuery',
         'openai_reasoning_effort',
         'openai_verbosity',
         'databasePrompts',
-        'databaseSettings'
+        'databaseSettings',
+        'llmProvider',
+        'llmModel'
       ],
       (res) => resolve(res)
     );
@@ -482,6 +486,52 @@ async function openaiChat(messages, { model = GPT5_NANO_MODEL, temperature = 0.2
   return content;
 }
 
+// Google Gemini helper
+async function geminiChat(messages, { model = 'gemini-2.5-flash' } = {}) {
+  const { googleApiKey } = await getConfig();
+  if (!googleApiKey) throw new Error('Falta la API key de Google AI (Gemini). Configúrala en Opciones.');
+  // Convert OpenAI-style messages to Gemini contents
+  const contents = [];
+  let systemInstruction = null;
+  for (const m of messages || []) {
+    const role = m.role === 'assistant' ? 'model' : (m.role === 'system' ? 'user' : m.role);
+    const text = typeof m.content === 'string' ? m.content : (Array.isArray(m.content) ? m.content.map((p) => (typeof p?.text === 'string' ? p.text : '')).join('\n') : '');
+    if (m.role === 'system') {
+      systemInstruction = { parts: [{ text }] };
+      continue;
+    }
+    contents.push({ role: role === 'system' ? 'user' : role, parts: [{ text }] });
+  }
+  const url = `${GOOGLE_GENAI_API_BASE}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(googleApiKey)}`;
+  const body = { contents };
+  if (systemInstruction) body.systemInstruction = systemInstruction;
+  const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    throw new Error(`Gemini API ${resp.status}: ${text}`);
+  }
+  const data = await resp.json();
+  const parts = data?.candidates?.[0]?.content?.parts || data?.candidates?.[0]?.content?.parts || [];
+  const out = Array.isArray(parts) ? parts.map((p) => p?.text || '').join('\n').trim() : '';
+  if (!out) throw new Error('Respuesta vacía del modelo.');
+  dbgBg('geminiChat: response chars =', out.length);
+  return out;
+}
+
+// Provider-agnostic LLM helper
+async function llmChat(messages, opts = {}) {
+  const cfg = await getConfig();
+  const provider = (opts.provider || cfg.llmProvider || 'openai');
+  const model = (opts.model || cfg.llmModel || (provider === 'google' ? 'gemini-2.5-flash' : GPT5_NANO_MODEL));
+  dbgBg('llmChat: using provider/model', { provider, model });
+  if (provider === 'google') {
+    return geminiChat(messages, { model });
+  }
+  // default to OpenAI
+  const { openai_reasoning_effort, openai_verbosity } = cfg;
+  return openaiChat(messages, { model, reasoning_effort: openai_reasoning_effort || 'low', verbosity: openai_verbosity || 'low' });
+}
+
 // Build a prompt to map page context to Notion properties
 function buildPromptForProperties(schema, pageContext, customInstructions, { useArticle } = { useArticle: true }) {
   const { url, title, meta, selectionText, textSample, headings, listItems, shortSpans, attrTexts, images, article } = pageContext;
@@ -524,7 +574,7 @@ function buildPromptForProperties(schema, pageContext, customInstructions, { use
         'You are an assistant that generates Notion PROPERTIES only from a database schema and page context.',
         'Return only VALID JSON shaped as { "properties": { ... } } (do NOT include "children").',
         '- "properties": must use the exact Notion API structure and respect the provided schema types.',
-        '- Always infer and set a clean "title" based on the database\'s nature (e.g., people, companies, books, films, recipes). Remove site/source prefixes or suffixes, bylines, emojis, quotes, and URLs; keep it concise.'
+        '- Title rules: The "title" property is MANDATORY and must be a strong, source-derived headline or entity name. Never return placeholders or generic values such as "Untitled", "New Page", "No title", "Home", or an empty string. Prefer the article title or first H1/H2; if unavailable, use meta og:title/twitter:title; otherwise derive from the URL slug by turning hyphen/underscore-separated words into a clean title. Remove site/section names, sources, categories, bylines, prefixes/suffixes, emojis, quotes, URLs, and separators like "|" or "/". Keep it concise (3–80 characters), Title Case when appropriate, and trim trailing punctuation.'
       ].join(' ')
     },
     {
@@ -534,7 +584,7 @@ function buildPromptForProperties(schema, pageContext, customInstructions, { use
         `\nPage context:\n${contextStr}`,
         '\n\nInstructions:',
         '- Fill as many properties as possible based on the context.',
-        '- There must be exactly one "title" property and you must set it to the best possible title. From the name of the database infer if those should be names of people, companies, movies, recipes etc. Remove any reference in the titles that to the sources, make them as clean as possible.',
+        '- The "title" property is REQUIRED. Compose the best possible title using content signals in this priority: article.title or H1 > H2 > og:title/twitter:title > URL slug. Do NOT include site names, categories, or sources; never output placeholders like "Untitled" or "New Page". Use concise Title Case, 3–80 characters, no emojis, no quotes, and avoid separators like "|" or "/". If the database suggests an entity type (people, companies, movies, recipes, etc.), set the title to that entity\'s clean name.',
         '- For select/multi_select: use existing options by exact name. Do NOT create new options by default. Only propose new options if the custom database instructions explicitly allow creating options. If no clear match exists and creation is not allowed, omit the property.',
         '- If a property name suggests an image (e.g., "Poster", "Cover", "Thumbnail", "Artwork", "Image", "Screenshot") and the page context contains an image URL (e.g., og:image or twitter:image), prefer filling that property with the image URL. If the database uses a files property, use the Notion files property shape with an external URL. Optionally, also add an image block to children using the same URL.',
         '- When choosing among multiple images, prefer medium-to-large content images (avoid tiny icons/sprites). As a heuristic, prioritize images where width or height ≥ 256px and de-prioritize those < 64px. Use the collected image context (alt text, nearest heading, parent text, classes, and any width/height or rendered sizes) to decide.',
@@ -790,7 +840,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         dbgBg('SAVE_TO_NOTION: fetched database schema');
         const schemaForLLM = extractSchemaForPrompt(db);
         dbgBg('SAVE_TO_NOTION: schemaForLLM', sanitizeForLog(schemaForLLM));
-        const { openai_reasoning_effort, openai_verbosity, databasePrompts, databaseSettings } = await getConfig();
+        const { openai_reasoning_effort, openai_verbosity, databasePrompts, databaseSettings, llmProvider, llmModel } = await getConfig();
         const settingsForDb = (databaseSettings || {})[databaseId] || {};
         const legacyPrompt = (databasePrompts || {})[databaseId] || '';
         const customInstructions = (settingsForDb.prompt ?? legacyPrompt) || '';
@@ -798,8 +848,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const effectiveSaveArticle = (typeof saveArticle === 'boolean' ? saveArticle : saveArticleFlag);
         const customizeContent = settingsForDb.customizeContent === true;
         const contentPrompt = typeof settingsForDb.contentPrompt === 'string' ? settingsForDb.contentPrompt.trim() : '';
+        const chosenProvider = message.llmProvider || llmProvider || 'openai';
+        const chosenModel = message.llmModel || llmModel || (chosenProvider === 'google' ? 'gemini-2.5-flash' : GPT5_NANO_MODEL);
         const promptMode = effectiveSaveArticle ? 'article+children' : 'properties-only';
-        dbgBg('SAVE_TO_NOTION: mode', { promptMode });
+        dbgBg('SAVE_TO_NOTION: mode', { promptMode, chosenProvider, chosenModel });
         debugReport.settings = {
           promptMode,
           saveArticleFlag,
@@ -855,8 +907,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         debugReport.promptMessages = prompt;
 
-        const content = await openaiChat(prompt, {
-          model: GPT5_NANO_MODEL,
+        const content = await llmChat(prompt, {
+          provider: chosenProvider,
+          model: chosenModel,
           reasoning_effort: openai_reasoning_effort || 'low',
           verbosity: openai_verbosity || 'low'
         });
@@ -911,7 +964,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               if (out.length >= MAX) break;
               if (typeof it === 'string') { out.push(make(it)); continue; }
               if (it && typeof it === 'object') {
-                if (it.type === 'text' && it.text && typeof it.text.content === 'string') {
+                // Accept both proper Notion shape and lenient LLM output missing type
+                if ((it.type === 'text' || it.type == null) && it.text && typeof it.text.content === 'string') {
                   const linkUrl = it.text.link?.url || it.href || (typeof it.text.link === 'string' ? it.text.link : undefined);
                   out.push(make(it.text.content, linkUrl));
                   continue;
@@ -1120,7 +1174,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 '  {"type":"numbered_list_item","numbered_list_item":{"rich_text":[{"type":"text","text":{"content":"Step 1"}}]}},',
                 '  {"type":"quote","quote":{"rich_text":[{"type":"text","text":{"content":"Quoted insight."}}]}},',
                 '  {"type":"image","image":{"external":{"url":"https://example.com/image.jpg"}}}',
-                ']' 
+                ']'
               ].join(' ') },
               { role: 'user', content: `Article HTML:\n${htmlForTransform}` },
               { role: 'user', content: `Transform instructions:\n${contentPrompt}` }
@@ -1150,7 +1204,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             } catch {}
             let replacedViaModel = false;
             try {
-              const transformed = await openaiChat(transformMessages, { model: GPT5_NANO_MODEL, reasoning_effort: openai_reasoning_effort || 'low', verbosity: openai_verbosity || 'low' });
+              const transformed = await llmChat(transformMessages, { provider: chosenProvider, model: chosenModel, reasoning_effort: openai_reasoning_effort || 'low', verbosity: openai_verbosity || 'low' });
               try { dbgBg('SAVE_TO_NOTION: content customization raw', transformed.slice(0, 2000)); } catch {}
               // Allow either a pure array or { children: [...] } shapes
               const tTrim = typeof transformed === 'string' ? transformed.trim() : '';
@@ -1199,7 +1253,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                   { role: 'user', content: `Transform instructions (again):\n${contentPrompt}` }
                 ];
                 try {
-                  const repaired = await openaiChat(repairMessages, { model: GPT5_NANO_MODEL, reasoning_effort: openai_reasoning_effort || 'low', verbosity: openai_verbosity || 'low' });
+                  const repaired = await llmChat(repairMessages, { provider: chosenProvider, model: chosenModel, reasoning_effort: openai_reasoning_effort || 'low', verbosity: openai_verbosity || 'low' });
                   let reparsed = null;
                   const rTrim = typeof repaired === 'string' ? repaired.trim() : '';
                   if (rTrim.startsWith('[')) { try { reparsed = JSON.parse(rTrim); } catch {} }
@@ -1242,7 +1296,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                   { role: 'user', content: `Context:\n${contextText}` },
                   { role: 'user', content: `Additional instructions for the paragraph:\n${contentPrompt}` }
                 ];
-                const resp = await openaiChat(summaryMessages, { model: GPT5_NANO_MODEL, reasoning_effort: openai_reasoning_effort || 'low', verbosity: openai_verbosity || 'low' });
+                const resp = await llmChat(summaryMessages, { provider: chosenProvider, model: chosenModel, reasoning_effort: openai_reasoning_effort || 'low', verbosity: openai_verbosity || 'low' });
                 const parsedSummary = extractJsonObject(resp) || JSON.parse(resp);
                 const safeSummary = sanitizeBlocks(Array.isArray(parsedSummary) ? parsedSummary : (parsedSummary?.children || []));
                 if (Array.isArray(safeSummary) && safeSummary.length) summaryBlocks = safeSummary.slice(0, 1);

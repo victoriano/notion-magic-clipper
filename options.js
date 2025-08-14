@@ -3,14 +3,56 @@
 function get(keys) { return new Promise((resolve) => chrome.storage.local.get(keys, resolve)); }
 function set(obj) { return new Promise((resolve) => chrome.storage.local.set(obj, resolve)); }
 
+function parseModelValue(value) {
+  const [provider, ...rest] = String(value || '').split(':');
+  return { provider: provider || 'openai', model: rest.join(':') || 'gpt-5-nano' };
+}
+
+function updateReasoningVisibility(provider, model) {
+  const reasoningCol = document.getElementById('reasoningCol');
+  const verbosityCol = document.getElementById('verbosityCol');
+  const isGPT5 = provider === 'openai' && /^gpt-5/i.test(model || '');
+  if (reasoningCol) reasoningCol.style.display = isGPT5 ? 'block' : 'none';
+  if (verbosityCol) verbosityCol.style.display = isGPT5 ? 'block' : 'none';
+}
+
+async function populateModelSelector({ openaiKey, googleApiKey, llmProvider, llmModel }) {
+  const sel = document.getElementById('model');
+  if (!sel) return;
+  sel.innerHTML = '';
+  const options = [];
+  if (openaiKey) options.push({ value: 'openai:gpt-5-nano', label: 'OpenAI · GPT-5 Nano' });
+  if (googleApiKey) options.push({ value: 'google:gemini-2.5-flash', label: 'Google · Gemini 2.5 Flash' });
+  if (options.length === 0) options.push({ value: 'openai:gpt-5-nano', label: 'OpenAI · GPT-5 Nano' });
+  for (const o of options) {
+    const opt = document.createElement('option');
+    opt.value = o.value;
+    opt.textContent = o.label;
+    sel.appendChild(opt);
+  }
+  const desired = `${llmProvider || 'openai'}:${llmModel || 'gpt-5-nano'}`;
+  const found = Array.from(sel.options).some((o) => o.value === desired);
+  sel.value = found ? desired : options[0].value;
+  const parsed = parseModelValue(sel.value);
+  await set({ llmProvider: parsed.provider, llmModel: parsed.model });
+  updateReasoningVisibility(parsed.provider, parsed.model);
+  sel.addEventListener('change', async () => {
+    const p = parseModelValue(sel.value);
+    await set({ llmProvider: p.provider, llmModel: p.model });
+    updateReasoningVisibility(p.provider, p.model);
+  });
+}
+
 async function load() {
-  const { notionToken, openaiKey, openai_reasoning_effort, openai_verbosity } = await get([
-    'notionToken', 'openaiKey', 'openai_reasoning_effort', 'openai_verbosity'
+  const { notionToken, openaiKey, googleApiKey, openai_reasoning_effort, openai_verbosity, llmProvider, llmModel } = await get([
+    'notionToken', 'openaiKey', 'googleApiKey', 'openai_reasoning_effort', 'openai_verbosity', 'llmProvider', 'llmModel'
   ]);
   if (notionToken) document.getElementById('notionToken').value = notionToken;
   if (openaiKey) document.getElementById('openaiKey').value = openaiKey;
+  if (googleApiKey) document.getElementById('googleApiKey').value = googleApiKey;
   if (openai_reasoning_effort) document.getElementById('reasoning').value = openai_reasoning_effort;
   if (openai_verbosity) document.getElementById('verbosity').value = openai_verbosity;
+  await populateModelSelector({ openaiKey, googleApiKey, llmProvider, llmModel });
 }
 
 async function save() {
@@ -18,10 +60,13 @@ async function save() {
   status.textContent = '';
   const notionToken = document.getElementById('notionToken').value.trim();
   const openaiKey = document.getElementById('openaiKey').value.trim();
+  const googleApiKey = (document.getElementById('googleApiKey')?.value || '').trim();
   const openai_reasoning_effort = document.getElementById('reasoning').value;
   const openai_verbosity = document.getElementById('verbosity').value;
+  const modelSel = document.getElementById('model');
+  const { provider: llmProvider, model: llmModel } = parseModelValue(modelSel ? modelSel.value : 'openai:gpt-5-nano');
 
-  await set({ notionToken, openaiKey, openai_reasoning_effort, openai_verbosity });
+  await set({ notionToken, openaiKey, googleApiKey, openai_reasoning_effort, openai_verbosity, llmProvider, llmModel });
   status.innerHTML = '<span class="success">Saved ✓</span>';
 }
 

@@ -14,12 +14,28 @@ function setStorage(obj) {
   return new Promise((resolve) => chrome.storage.local.set(obj, resolve));
 }
 
+function formatModelLabel(provider, model) {
+  if (provider === 'google' && /gemini-2\.5-flash/i.test(model || '')) return 'Google · Gemini 2.5 Flash';
+  if (provider === 'openai' && /^gpt-5/i.test(model || '')) return 'OpenAI · GPT-5 Nano';
+  if (provider && model) return `${provider}:${model}`;
+  return 'Selected model';
+}
+
 async function precheck() {
   const pre = document.getElementById('precheck');
   const app = document.getElementById('app');
-  const cfg = await getStorage(['notionToken', 'openaiKey']);
-  if (!cfg.notionToken || !cfg.openaiKey) {
-    pre.innerHTML = `<div class="error">Tokens missing. Set your <b>Notion Token</b> and <b>OpenAI API key</b> in Options.</div>`;
+  const cfg = await getStorage(['notionToken', 'openaiKey', 'googleApiKey', 'llmProvider', 'llmModel']);
+  const provider = cfg.llmProvider || 'openai';
+  const model = cfg.llmModel || 'gpt-5-nano';
+  const hasNotion = !!cfg.notionToken;
+  const hasOpenAI = !!cfg.openaiKey;
+  const hasGoogle = !!cfg.googleApiKey;
+  let hasLLM = false;
+  if (provider === 'openai') hasLLM = hasOpenAI;
+  else if (provider === 'google') hasLLM = hasGoogle;
+  else hasLLM = hasOpenAI || hasGoogle; // fallback if unknown provider
+  if (!hasNotion || !hasLLM) {
+    pre.innerHTML = `<div class="error">${!hasNotion ? 'Notion token missing. ' : ''}${!hasLLM ? 'LLM key missing for selected provider.' : ''} Open <b>Options</b> to configure.</div>`;
   } else {
     pre.innerHTML = `<div class="success">Tokens configured. Ready to save.</div>`;
   }
@@ -87,6 +103,7 @@ async function save() {
   const status = document.getElementById('status');
   status.textContent = '';
   const dbSel = document.getElementById('databases');
+  const { llmProvider, llmModel } = await getStorage(['llmProvider', 'llmModel']);
   const databaseId = dbSel.value;
   if (!databaseId) {
     status.textContent = 'Debes seleccionar una base de datos.';
@@ -103,9 +120,7 @@ async function save() {
     status.textContent = String(e.message || e);
     return;
   }
-  // Raw log of the full page context for inspection (no truncation)
   (function logContext(ctx) {
-    // Log a snapshot to avoid live object mutation issues
     try {
       console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Page context (full):`, structuredClone(ctx));
     } catch {
@@ -122,19 +137,18 @@ async function save() {
       }
     );
   })(context);
-  // Determine if article exists (UI no longer shows a toggle)
-  const hasArticle = !!context?.article?.html || !!context?.article?.text;
-
-  status.textContent = 'Analyzing content with GPT-5 Nano and saving to Notion...';
+  const label = formatModelLabel(llmProvider || 'openai', llmModel || 'gpt-5-nano');
+  status.textContent = `Analyzing content with ${label} and saving to Notion...`;
   console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Got page context. Sending SAVE_TO_NOTION…`);
   const note = document.getElementById('note').value.trim();
-  // Do not send UI-controlled saveArticle flag; background will use per-DB settings.
   const res = await chrome.runtime.sendMessage({
     type: 'SAVE_TO_NOTION',
     databaseId,
     pageContext: context,
     note,
-    startedAt
+    startedAt,
+    llmProvider,
+    llmModel
   });
   if (!res?.ok) {
     console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Save failed:`, res?.error);
@@ -143,7 +157,8 @@ async function save() {
   }
   console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Save success. Page created.`);
   const pageUrl = res?.page?.url || res?.page?.public_url;
-  status.innerHTML = `<span class="success">Saved successfully ✅</span>` + (pageUrl ? `<div class="success-link"><a href="${pageUrl}" target="_blank" rel="noopener noreferrer">Open in Notion ↗</a></div>` : '');
+  const seconds = Math.max(0, Math.round((Date.now() - startedAt) / 1000));
+  status.innerHTML = `<span class="success">Saved successfully in ${seconds} seconds ✅</span>` + (pageUrl ? `<div class="success-link"><a href="${pageUrl}" target="_blank" rel="noopener noreferrer">Open in Notion ↗</a></div>` : '');
 }
 
 async function main() {
