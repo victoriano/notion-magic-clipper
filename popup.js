@@ -70,8 +70,13 @@ async function getPageContext(tabId) {
     const msg = String(err?.message || err || '');
     const receivingEnd = msg.includes('Receiving end does not exist') || msg.includes('Could not establish connection');
     if (!receivingEnd) throw err;
-    // Fallback: inject content script and retry
-    await chrome.scripting.executeScript({ target: { tabId }, files: ['contentScript.js'] });
+    // Fallback: inject vendor readability and content script in order, then retry
+    await chrome.scripting.executeScript({ target: { tabId }, files: [
+      'vendor/readability/JSDOMParser.js',
+      'vendor/readability/Readability.js',
+      'vendor/readability/Readability-readerable.js',
+      'contentScript.js'
+    ] });
     const res2 = await chrome.tabs.sendMessage(tabId, { type: 'GET_PAGE_CONTEXT' });
     if (!res2?.ok) throw new Error(res2?.error || 'Could not get context after injecting content script');
     return res2.context;
@@ -98,34 +103,14 @@ async function save() {
     status.textContent = String(e.message || e);
     return;
   }
-  // Pretty/safe log of the full page context for inspection
+  // Raw log of the full page context for inspection (no truncation)
   (function logContext(ctx) {
-    function sanitizeForLog(value, depth = 0) {
-      const MAX_DEPTH = 3;
-      const MAX_STRING = 300;
-      const MAX_ARRAY = 10;
-      if (value == null) return value;
-      if (typeof value === 'string') {
-        return value.length > MAX_STRING ? value.slice(0, MAX_STRING) + '…' : value;
-      }
-      if (typeof value !== 'object') return value;
-      if (depth >= MAX_DEPTH) return '…';
-      if (Array.isArray(value)) {
-        return value
-          .slice(0, MAX_ARRAY)
-          .map((v) => sanitizeForLog(v, depth + 1))
-          .concat(value.length > MAX_ARRAY ? ['…'] : []);
-      }
-      const out = {};
-      for (const [k, v] of Object.entries(value)) {
-        out[k] = sanitizeForLog(v, depth + 1);
-      }
-      return out;
+    // Log a snapshot to avoid live object mutation issues
+    try {
+      console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Page context (full):`, structuredClone(ctx));
+    } catch {
+      console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Page context (full):`, ctx);
     }
-    console.log(
-      `[NotionMagicClipper][Popup ${new Date().toISOString()}] Page context:`,
-      sanitizeForLog(ctx)
-    );
     console.log(
       `[NotionMagicClipper][Popup ${new Date().toISOString()}] Context counts:`,
       {
@@ -137,9 +122,13 @@ async function save() {
       }
     );
   })(context);
+  // Determine if article exists (UI no longer shows a toggle)
+  const hasArticle = !!context?.article?.html || !!context?.article?.text;
+
   status.textContent = 'Analyzing content with GPT-5 Nano and saving to Notion...';
   console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Got page context. Sending SAVE_TO_NOTION…`);
   const note = document.getElementById('note').value.trim();
+  // Do not send UI-controlled saveArticle flag; background will use per-DB settings.
   const res = await chrome.runtime.sendMessage({
     type: 'SAVE_TO_NOTION',
     databaseId,
