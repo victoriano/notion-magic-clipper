@@ -39,8 +39,12 @@
     <input id="googleApiKey" type="password" placeholder="AIza..." />
     <small>Create a key in Google AI Studio and paste it here. It will be stored locally.</small>
 
+    <label for="model">Model</label>
+    <select id="model"></select>
+    <small>Pick the model to use. Make sure the corresponding API key is configured above.</small>
+
     <div class="row">
-      <div class="col">
+      <div class="col" id="reasoningCol">
         <label for="reasoning">Reasoning effort (GPT-5)</label>
         <select id="reasoning">
           <option value="minimal">minimal</option>
@@ -49,7 +53,7 @@
           <option value="high">high</option>
         </select>
       </div>
-      <div class="col">
+      <div class="col" id="verbosityCol">
         <label for="verbosity">Verbosity (GPT-5)</label>
         <select id="verbosity">
           <option value="low" selected>low</option>

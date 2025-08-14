@@ -574,7 +574,7 @@ function buildPromptForProperties(schema, pageContext, customInstructions, { use
         'You are an assistant that generates Notion PROPERTIES only from a database schema and page context.',
         'Return only VALID JSON shaped as { "properties": { ... } } (do NOT include "children").',
         '- "properties": must use the exact Notion API structure and respect the provided schema types.',
-        '- Always infer and set a clean "title" based on the database\'s nature (e.g., people, companies, books, films, recipes). Remove site/source prefixes or suffixes, bylines, emojis, quotes, and URLs; keep it concise.'
+        '- Title rules: The "title" property is MANDATORY and must be a strong, source-derived headline or entity name. Never return placeholders or generic values such as "Untitled", "New Page", "No title", "Home", or an empty string. Prefer the article title or first H1/H2; if unavailable, use meta og:title/twitter:title; otherwise derive from the URL slug by turning hyphen/underscore-separated words into a clean title. Remove site/section names, sources, categories, bylines, prefixes/suffixes, emojis, quotes, URLs, and separators like "|" or "/". Keep it concise (3–80 characters), Title Case when appropriate, and trim trailing punctuation.'
       ].join(' ')
     },
     {
@@ -584,7 +584,7 @@ function buildPromptForProperties(schema, pageContext, customInstructions, { use
         `\nPage context:\n${contextStr}`,
         '\n\nInstructions:',
         '- Fill as many properties as possible based on the context.',
-        '- There must be exactly one "title" property and you must set it to the best possible title. From the name of the database infer if those should be names of people, companies, movies, recipes etc. Remove any reference in the titles that to the sources, make them as clean as possible.',
+        '- The "title" property is REQUIRED. Compose the best possible title using content signals in this priority: article.title or H1 > H2 > og:title/twitter:title > URL slug. Do NOT include site names, categories, or sources; never output placeholders like "Untitled" or "New Page". Use concise Title Case, 3–80 characters, no emojis, no quotes, and avoid separators like "|" or "/". If the database suggests an entity type (people, companies, movies, recipes, etc.), set the title to that entity\'s clean name.',
         '- For select/multi_select: use existing options by exact name. Do NOT create new options by default. Only propose new options if the custom database instructions explicitly allow creating options. If no clear match exists and creation is not allowed, omit the property.',
         '- If a property name suggests an image (e.g., "Poster", "Cover", "Thumbnail", "Artwork", "Image", "Screenshot") and the page context contains an image URL (e.g., og:image or twitter:image), prefer filling that property with the image URL. If the database uses a files property, use the Notion files property shape with an external URL. Optionally, also add an image block to children using the same URL.',
         '- When choosing among multiple images, prefer medium-to-large content images (avoid tiny icons/sprites). As a heuristic, prioritize images where width or height ≥ 256px and de-prioritize those < 64px. Use the collected image context (alt text, nearest heading, parent text, classes, and any width/height or rendered sizes) to decide.',
@@ -964,7 +964,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               if (out.length >= MAX) break;
               if (typeof it === 'string') { out.push(make(it)); continue; }
               if (it && typeof it === 'object') {
-                if (it.type === 'text' && it.text && typeof it.text.content === 'string') {
+                // Accept both proper Notion shape and lenient LLM output missing type
+                if ((it.type === 'text' || it.type == null) && it.text && typeof it.text.content === 'string') {
                   const linkUrl = it.text.link?.url || it.href || (typeof it.text.link === 'string' ? it.text.link : undefined);
                   out.push(make(it.text.content, linkUrl));
                   continue;
