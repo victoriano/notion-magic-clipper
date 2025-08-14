@@ -4,11 +4,12 @@ function get(keys) { return new Promise((resolve) => chrome.storage.local.get(ke
 function set(obj) { return new Promise((resolve) => chrome.storage.local.set(obj, resolve)); }
 
 async function load() {
-  const { notionToken, openaiKey, openai_reasoning_effort, openai_verbosity } = await get([
-    'notionToken', 'openaiKey', 'openai_reasoning_effort', 'openai_verbosity'
+  const { notionToken, openaiKey, googleApiKey, openai_reasoning_effort, openai_verbosity } = await get([
+    'notionToken', 'openaiKey', 'googleApiKey', 'openai_reasoning_effort', 'openai_verbosity'
   ]);
   if (notionToken) document.getElementById('notionToken').value = notionToken;
   if (openaiKey) document.getElementById('openaiKey').value = openaiKey;
+  if (googleApiKey) document.getElementById('googleApiKey').value = googleApiKey;
   if (openai_reasoning_effort) document.getElementById('reasoning').value = openai_reasoning_effort;
   if (openai_verbosity) document.getElementById('verbosity').value = openai_verbosity;
 }
@@ -18,10 +19,11 @@ async function save() {
   status.textContent = '';
   const notionToken = document.getElementById('notionToken').value.trim();
   const openaiKey = document.getElementById('openaiKey').value.trim();
+  const googleApiKey = (document.getElementById('googleApiKey')?.value || '').trim();
   const openai_reasoning_effort = document.getElementById('reasoning').value;
   const openai_verbosity = document.getElementById('verbosity').value;
 
-  await set({ notionToken, openaiKey, openai_reasoning_effort, openai_verbosity });
+  await set({ notionToken, openaiKey, googleApiKey, openai_reasoning_effort, openai_verbosity });
   status.innerHTML = '<span class="success">Saved ✓</span>';
 }
 

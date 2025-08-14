@@ -7,6 +7,7 @@ const NOTION_API_BASE = 'https://api.notion.com/v1';
 const NOTION_VERSION = '2022-06-28'; // latest per Notion docs
 const OPENAI_API_BASE = 'https://api.openai.com/v1';
 const GPT5_NANO_MODEL = 'gpt-5-nano';
+const GOOGLE_GENAI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
 // Debug logging helper
 const DEBUG_LOGS = true;
@@ -44,11 +45,14 @@ async function getConfig() {
       [
         'notionToken',
         'openaiKey',
+        'googleApiKey',
         'notionSearchQuery',
         'openai_reasoning_effort',
         'openai_verbosity',
         'databasePrompts',
-        'databaseSettings'
+        'databaseSettings',
+        'llmProvider',
+        'llmModel'
       ],
       (res) => resolve(res)
     );
@@ -482,6 +486,52 @@ async function openaiChat(messages, { model = GPT5_NANO_MODEL, temperature = 0.2
   return content;
 }
 
+// Google Gemini helper
+async function geminiChat(messages, { model = 'gemini-2.5-flash' } = {}) {
+  const { googleApiKey } = await getConfig();
+  if (!googleApiKey) throw new Error('Falta la API key de Google AI (Gemini). Configúrala en Opciones.');
+  // Convert OpenAI-style messages to Gemini contents
+  const contents = [];
+  let systemInstruction = null;
+  for (const m of messages || []) {
+    const role = m.role === 'assistant' ? 'model' : (m.role === 'system' ? 'user' : m.role);
+    const text = typeof m.content === 'string' ? m.content : (Array.isArray(m.content) ? m.content.map((p) => (typeof p?.text === 'string' ? p.text : '')).join('\n') : '');
+    if (m.role === 'system') {
+      systemInstruction = { parts: [{ text }] };
+      continue;
+    }
+    contents.push({ role: role === 'system' ? 'user' : role, parts: [{ text }] });
+  }
+  const url = `${GOOGLE_GENAI_API_BASE}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(googleApiKey)}`;
+  const body = { contents };
+  if (systemInstruction) body.systemInstruction = systemInstruction;
+  const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    throw new Error(`Gemini API ${resp.status}: ${text}`);
+  }
+  const data = await resp.json();
+  const parts = data?.candidates?.[0]?.content?.parts || data?.candidates?.[0]?.content?.parts || [];
+  const out = Array.isArray(parts) ? parts.map((p) => p?.text || '').join('\n').trim() : '';
+  if (!out) throw new Error('Respuesta vacía del modelo.');
+  dbgBg('geminiChat: response chars =', out.length);
+  return out;
+}
+
+// Provider-agnostic LLM helper
+async function llmChat(messages, opts = {}) {
+  const cfg = await getConfig();
+  const provider = (opts.provider || cfg.llmProvider || 'openai');
+  const model = (opts.model || cfg.llmModel || (provider === 'google' ? 'gemini-2.5-flash' : GPT5_NANO_MODEL));
+  dbgBg('llmChat: using provider/model', { provider, model });
+  if (provider === 'google') {
+    return geminiChat(messages, { model });
+  }
+  // default to OpenAI
+  const { openai_reasoning_effort, openai_verbosity } = cfg;
+  return openaiChat(messages, { model, reasoning_effort: openai_reasoning_effort || 'low', verbosity: openai_verbosity || 'low' });
+}
+
 // Build a prompt to map page context to Notion properties
 function buildPromptForProperties(schema, pageContext, customInstructions, { useArticle } = { useArticle: true }) {
   const { url, title, meta, selectionText, textSample, headings, listItems, shortSpans, attrTexts, images, article } = pageContext;
@@ -790,7 +840,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         dbgBg('SAVE_TO_NOTION: fetched database schema');
         const schemaForLLM = extractSchemaForPrompt(db);
         dbgBg('SAVE_TO_NOTION: schemaForLLM', sanitizeForLog(schemaForLLM));
-        const { openai_reasoning_effort, openai_verbosity, databasePrompts, databaseSettings } = await getConfig();
+        const { openai_reasoning_effort, openai_verbosity, databasePrompts, databaseSettings, llmProvider, llmModel } = await getConfig();
         const settingsForDb = (databaseSettings || {})[databaseId] || {};
         const legacyPrompt = (databasePrompts || {})[databaseId] || '';
         const customInstructions = (settingsForDb.prompt ?? legacyPrompt) || '';
@@ -798,8 +848,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const effectiveSaveArticle = (typeof saveArticle === 'boolean' ? saveArticle : saveArticleFlag);
         const customizeContent = settingsForDb.customizeContent === true;
         const contentPrompt = typeof settingsForDb.contentPrompt === 'string' ? settingsForDb.contentPrompt.trim() : '';
+        const chosenProvider = message.llmProvider || llmProvider || 'openai';
+        const chosenModel = message.llmModel || llmModel || (chosenProvider === 'google' ? 'gemini-2.5-flash' : GPT5_NANO_MODEL);
         const promptMode = effectiveSaveArticle ? 'article+children' : 'properties-only';
-        dbgBg('SAVE_TO_NOTION: mode', { promptMode });
+        dbgBg('SAVE_TO_NOTION: mode', { promptMode, chosenProvider, chosenModel });
         debugReport.settings = {
           promptMode,
           saveArticleFlag,
@@ -855,8 +907,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         debugReport.promptMessages = prompt;
 
-        const content = await openaiChat(prompt, {
-          model: GPT5_NANO_MODEL,
+        const content = await llmChat(prompt, {
+          provider: chosenProvider,
+          model: chosenModel,
           reasoning_effort: openai_reasoning_effort || 'low',
           verbosity: openai_verbosity || 'low'
         });
@@ -1120,7 +1173,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 '  {"type":"numbered_list_item","numbered_list_item":{"rich_text":[{"type":"text","text":{"content":"Step 1"}}]}},',
                 '  {"type":"quote","quote":{"rich_text":[{"type":"text","text":{"content":"Quoted insight."}}]}},',
                 '  {"type":"image","image":{"external":{"url":"https://example.com/image.jpg"}}}',
-                ']' 
+                ']'
               ].join(' ') },
               { role: 'user', content: `Article HTML:\n${htmlForTransform}` },
               { role: 'user', content: `Transform instructions:\n${contentPrompt}` }
@@ -1150,7 +1203,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             } catch {}
             let replacedViaModel = false;
             try {
-              const transformed = await openaiChat(transformMessages, { model: GPT5_NANO_MODEL, reasoning_effort: openai_reasoning_effort || 'low', verbosity: openai_verbosity || 'low' });
+              const transformed = await llmChat(transformMessages, { provider: chosenProvider, model: chosenModel, reasoning_effort: openai_reasoning_effort || 'low', verbosity: openai_verbosity || 'low' });
               try { dbgBg('SAVE_TO_NOTION: content customization raw', transformed.slice(0, 2000)); } catch {}
               // Allow either a pure array or { children: [...] } shapes
               const tTrim = typeof transformed === 'string' ? transformed.trim() : '';
@@ -1199,7 +1252,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                   { role: 'user', content: `Transform instructions (again):\n${contentPrompt}` }
                 ];
                 try {
-                  const repaired = await openaiChat(repairMessages, { model: GPT5_NANO_MODEL, reasoning_effort: openai_reasoning_effort || 'low', verbosity: openai_verbosity || 'low' });
+                  const repaired = await llmChat(repairMessages, { provider: chosenProvider, model: chosenModel, reasoning_effort: openai_reasoning_effort || 'low', verbosity: openai_verbosity || 'low' });
                   let reparsed = null;
                   const rTrim = typeof repaired === 'string' ? repaired.trim() : '';
                   if (rTrim.startsWith('[')) { try { reparsed = JSON.parse(rTrim); } catch {} }
@@ -1242,7 +1295,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                   { role: 'user', content: `Context:\n${contextText}` },
                   { role: 'user', content: `Additional instructions for the paragraph:\n${contentPrompt}` }
                 ];
-                const resp = await openaiChat(summaryMessages, { model: GPT5_NANO_MODEL, reasoning_effort: openai_reasoning_effort || 'low', verbosity: openai_verbosity || 'low' });
+                const resp = await llmChat(summaryMessages, { provider: chosenProvider, model: chosenModel, reasoning_effort: openai_reasoning_effort || 'low', verbosity: openai_verbosity || 'low' });
                 const parsedSummary = extractJsonObject(resp) || JSON.parse(resp);
                 const safeSummary = sanitizeBlocks(Array.isArray(parsedSummary) ? parsedSummary : (parsedSummary?.children || []));
                 if (Array.isArray(safeSummary) && safeSummary.length) summaryBlocks = safeSummary.slice(0, 1);

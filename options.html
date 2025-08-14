@@ -20,7 +20,7 @@
   </head>
   <body>
     <h2>Options</h2>
-    <p>Configure your connection with Notion and OpenAI (GPT-5 Nano).</p>
+    <p>Configure your connection with Notion and LLM providers (OpenAI, Google Gemini).</p>
 
     <label for="notionToken">Notion Integration Token</label>
     <input id="notionToken" type="password" placeholder="secret_..." />
@@ -34,6 +34,10 @@
     <label for="openaiKey">OpenAI API Key</label>
     <input id="openaiKey" type="password" placeholder="sk-..." />
     <small>Your API key is stored in the extension's local storage.</small>
+
+    <label for="googleApiKey">Google AI API Key (Gemini)</label>
+    <input id="googleApiKey" type="password" placeholder="AIza..." />
+    <small>Create a key in Google AI Studio and paste it here. It will be stored locally.</small>
 
     <div class="row">
       <div class="col">

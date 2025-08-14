@@ -14,12 +14,26 @@ function setStorage(obj) {
   return new Promise((resolve) => chrome.storage.local.set(obj, resolve));
 }
 
+function parseModelValue(value) {
+  const [provider, ...rest] = String(value || '').split(':');
+  return { provider: provider || 'openai', model: rest.join(':') || 'gpt-5-nano' };
+}
+
 async function precheck() {
   const pre = document.getElementById('precheck');
   const app = document.getElementById('app');
-  const cfg = await getStorage(['notionToken', 'openaiKey']);
-  if (!cfg.notionToken || !cfg.openaiKey) {
-    pre.innerHTML = `<div class="error">Tokens missing. Set your <b>Notion Token</b> and <b>OpenAI API key</b> in Options.</div>`;
+  const cfg = await getStorage(['notionToken', 'openaiKey', 'googleApiKey', 'llmProvider', 'llmModel']);
+  const provider = cfg.llmProvider || 'openai';
+  const model = cfg.llmModel || 'gpt-5-nano';
+  const hasNotion = !!cfg.notionToken;
+  const hasOpenAI = !!cfg.openaiKey;
+  const hasGoogle = !!cfg.googleApiKey;
+  let hasLLM = false;
+  if (provider === 'openai') hasLLM = hasOpenAI;
+  else if (provider === 'google') hasLLM = hasGoogle;
+  else hasLLM = hasOpenAI || hasGoogle; // fallback if unknown provider
+  if (!hasNotion || !hasLLM) {
+    pre.innerHTML = `<div class="error">${!hasNotion ? 'Notion token missing. ' : ''}${!hasLLM ? 'LLM key missing for selected provider.' : ''} Open <b>Options</b> to configure.</div>`;
   } else {
     pre.innerHTML = `<div class="success">Tokens configured. Ready to save.</div>`;
   }
@@ -61,6 +75,35 @@ async function loadDatabases() {
   console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Databases loaded:`, list.length);
 }
 
+async function loadModels() {
+  const sel = document.getElementById('model');
+  sel.innerHTML = '';
+  const { openaiKey, googleApiKey, llmProvider, llmModel } = await getStorage(['openaiKey', 'googleApiKey', 'llmProvider', 'llmModel']);
+  const options = [];
+  if (openaiKey) options.push({ value: 'openai:gpt-5-nano', label: 'OpenAI · GPT-5 Nano' });
+  if (googleApiKey) options.push({ value: 'google:gemini-2.5-flash', label: 'Google · Gemini 2.5 Flash' });
+  // If no keys present, still show OpenAI option so user sees something
+  if (options.length === 0) options.push({ value: 'openai:gpt-5-nano', label: 'OpenAI · GPT-5 Nano' });
+  for (const o of options) {
+    const opt = document.createElement('option');
+    opt.value = o.value;
+    opt.textContent = o.label;
+    sel.appendChild(opt);
+  }
+  const desired = `${llmProvider || 'openai'}:${llmModel || 'gpt-5-nano'}`;
+  const found = Array.from(sel.options).some((o) => o.value === desired);
+  sel.value = found ? desired : options[0].value;
+  const parsed = parseModelValue(sel.value);
+  await setStorage({ llmProvider: parsed.provider, llmModel: parsed.model });
+  await precheck();
+  sel.addEventListener('change', async () => {
+    const p = parseModelValue(sel.value);
+    await setStorage({ llmProvider: p.provider, llmModel: p.model });
+    // Re-run precheck to reflect provider key presence
+    await precheck();
+  });
+}
+
 async function getPageContext(tabId) {
   try {
     const res = await chrome.tabs.sendMessage(tabId, { type: 'GET_PAGE_CONTEXT' });
@@ -87,6 +130,8 @@ async function save() {
   const status = document.getElementById('status');
   status.textContent = '';
   const dbSel = document.getElementById('databases');
+  const modelSel = document.getElementById('model');
+  const { provider: llmProvider, model: llmModel } = parseModelValue(modelSel.value);
   const databaseId = dbSel.value;
   if (!databaseId) {
     status.textContent = 'Debes seleccionar una base de datos.';
@@ -103,9 +148,7 @@ async function save() {
     status.textContent = String(e.message || e);
     return;
   }
-  // Raw log of the full page context for inspection (no truncation)
   (function logContext(ctx) {
-    // Log a snapshot to avoid live object mutation issues
     try {
       console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Page context (full):`, structuredClone(ctx));
     } catch {
@@ -122,19 +165,18 @@ async function save() {
       }
     );
   })(context);
-  // Determine if article exists (UI no longer shows a toggle)
-  const hasArticle = !!context?.article?.html || !!context?.article?.text;
-
-  status.textContent = 'Analyzing content with GPT-5 Nano and saving to Notion...';
+  const label = modelSel.options[modelSel.selectedIndex]?.textContent || 'Selected model';
+  status.textContent = `Analyzing content with ${label} and saving to Notion...`;
   console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Got page context. Sending SAVE_TO_NOTION…`);
   const note = document.getElementById('note').value.trim();
-  // Do not send UI-controlled saveArticle flag; background will use per-DB settings.
   const res = await chrome.runtime.sendMessage({
     type: 'SAVE_TO_NOTION',
     databaseId,
     pageContext: context,
     note,
-    startedAt
+    startedAt,
+    llmProvider,
+    llmModel
   });
   if (!res?.ok) {
     console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Save failed:`, res?.error);
@@ -149,6 +191,7 @@ async function save() {
 async function main() {
   await precheck();
   await loadDatabases();
+  await loadModels();
 
   document.getElementById('refresh').addEventListener('click', loadDatabases);
   document.getElementById('search').addEventListener('change', async (e) => {
