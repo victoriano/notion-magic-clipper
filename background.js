@@ -523,7 +523,8 @@ function buildPromptForProperties(schema, pageContext, customInstructions, { use
       content: [
         'You are an assistant that generates Notion PROPERTIES only from a database schema and page context.',
         'Return only VALID JSON shaped as { "properties": { ... } } (do NOT include "children").',
-        '- "properties": must use the exact Notion API structure and respect the provided schema types.'
+        '- "properties": must use the exact Notion API structure and respect the provided schema types.',
+        '- Always infer and set a clean "title" based on the database\'s nature (e.g., people, companies, books, films, recipes). Remove site/source prefixes or suffixes, bylines, emojis, quotes, and URLs; keep it concise.'
       ].join(' ')
     },
     {
@@ -1098,11 +1099,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               { role: 'system', content: [
                 'You convert ARTICLE HTML into a JSON array of Notion blocks according to the user instructions.',
                 'Output rules:',
-                '- Return ONLY a raw JSON array (no wrapper object, no code fences).',
+                '- Return ONLY a raw JSON array (no wrapper object, no code fences). Do NOT ask questions or propose plans. Output the final array now.',
                 '- Allowed block types: paragraph, heading_1, heading_2, heading_3, bulleted_list_item, numbered_list_item, quote, image.',
                 '- For text blocks use simple rich_text with plain text only (no annotations).',
                 '- For image blocks use the external URL shape only.',
                 '- Do NOT include fields like object, id, children, created_time, annotations, etc.',
+                '- Keep the array to at most 100 blocks. Prefer a concise summary followed by the most important sections/images in reading order.',
                 'Examples:',
                 '[',
                 '  {"type":"heading_2","heading_2":{"rich_text":[{"type":"text","text":{"content":"Section title"}}]}},',
@@ -1173,10 +1175,38 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 if (!debugReport.customization) debugReport.customization = { used: true };
                 debugReport.customization.responseViewer = parsedTransformed;
               } catch {}
-              const safeTransformed = sanitizeBlocks(Array.isArray(parsedTransformed) ? parsedTransformed : []);
+              let safeTransformed = sanitizeBlocks(Array.isArray(parsedTransformed) ? parsedTransformed : []);
               if (Array.isArray(safeTransformed) && safeTransformed.length) {
                 children = safeTransformed;
                 replacedViaModel = true;
+              }
+              // Retry once with a stricter repair prompt if we still have zero blocks and the model answered with prose
+              if (!replacedViaModel) {
+                const repairMessages = [
+                  { role: 'system', content: [
+                    'Your previous answer was not a JSON array of Notion blocks. Return ONLY a raw JSON array now, with at most 100 blocks.',
+                    'Allowed types: paragraph, heading_1, heading_2, heading_3, bulleted_list_item, numbered_list_item, quote, image.',
+                    'No wrapper object, no code fences, no explanation.'
+                  ].join(' ') },
+                  { role: 'user', content: `Article HTML (again):\n${htmlForTransform}` },
+                  { role: 'user', content: `Transform instructions (again):\n${contentPrompt}` }
+                ];
+                try {
+                  const repaired = await openaiChat(repairMessages, { model: GPT5_NANO_MODEL, reasoning_effort: openai_reasoning_effort || 'low', verbosity: openai_verbosity || 'low' });
+                  let reparsed = null;
+                  const rTrim = typeof repaired === 'string' ? repaired.trim() : '';
+                  if (rTrim.startsWith('[')) { try { reparsed = JSON.parse(rTrim); } catch {} }
+                  if (!reparsed) reparsed = extractJsonObject(repaired);
+                  if (Array.isArray(reparsed)) {
+                    safeTransformed = sanitizeBlocks(reparsed);
+                    if (Array.isArray(safeTransformed) && safeTransformed.length) {
+                      children = safeTransformed;
+                      replacedViaModel = true;
+                    }
+                  }
+                  try { dbgBg('SAVE_TO_NOTION: customization repair raw', repaired.slice(0, 2000)); } catch {}
+                  try { dbgBg('SAVE_TO_NOTION: customization repair parsed (len)', Array.isArray(safeTransformed) ? safeTransformed.length : 0); } catch {}
+                } catch {}
               }
               try { dbgBg('SAVE_TO_NOTION: content customization parsed (first block)', Array.isArray(children) && children[0] ? sanitizeForLog(children[0]) : null); } catch {}
               dbgBg('SAVE_TO_NOTION: content customization done', { outCount: children.length });
@@ -1310,7 +1340,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           : undefined;
         const dbTitle = Array.isArray(db?.title) ? db.title.map((t) => t.plain_text).join('') : '';
         await recordRecentSave({ url: pageUrl, ts: Date.now(), databaseId, databaseTitle: dbTitle, title: finalTitle, sourceUrl: pageContext.url || '', durationMs: t1 - t0 });
-        try { dbgBg('DEBUG_REPORT_JSON', JSON.stringify(debugReport, null, 2)); } catch {}
+        const totalSeconds = ((Date.now() - t0) / 1000).toFixed(1);
+        dbgBg('SAVE_TO_NOTION: total time (s)', totalSeconds);
         sendResponse({ ok: true, page: created });      } catch (e) {
         sendResponse({ ok: false, error: String(e.message || e) });
       }
