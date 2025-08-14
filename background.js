@@ -770,9 +770,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           const artHtml = pageContext?.article?.html || '';
           if (typeof artHtml === 'string' && artHtml.length > 0) {
             dbgBg('READABILITY_HTML: length', artHtml.length);
+            // Print the entire HTML in chunks for easy copy/paste (avoids console truncation)
             try {
-              const dataUrl = 'data:text/plain;charset=utf-8,' + encodeURIComponent(artHtml);
-              dbgBg('READABILITY_HTML: data URL (open to view/copy full source)', dataUrl);
+              const chunkSize = 50000; // characters per chunk
+              const total = Math.ceil(artHtml.length / chunkSize) || 1;
+              dbgBg('READABILITY_HTML: chunks', { count: total, chunkSize });
+              for (let i = 0; i < total; i++) {
+                const start = i * chunkSize;
+                const end = Math.min(artHtml.length, start + chunkSize);
+                dbgBg(`READABILITY_HTML: chunk ${i + 1}/${total}`, artHtml.slice(start, end));
+              }
             } catch {}
             debugReport.readabilityHtmlLen = artHtml.length;
             debugReport.readabilityHtmlSample = artHtml.slice(0, 20000);
