@@ -15,6 +15,28 @@
       .link { color: #1976d2; cursor: pointer; text-decoration: underline; }
       #status { margin-top: 8px; min-height: 1.2em; }
       #note { height: 60px; }
+      /* Combobox (shadcn-like) */
+      .combobox { position: relative; width: 100%; }
+      .combobox-trigger { width: 100%; display: flex; justify-content: space-between; align-items: center; border: 1px solid #ccc; border-radius: 8px; background: #fff; color: #111; padding: 6px 10px; }
+      .combobox-trigger .chevron { opacity: 0.6; }
+      .cbx-dropdown { position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: #fff; border: 1px solid #ddd; border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,0.12); z-index: 1000; display: none; }
+      .cbx-search-wrapper { padding: 6px; border-bottom: 1px solid #eee; }
+      .cbx-search { width: 100%; padding: 6px 8px; border: 1px solid #ddd; border-radius: 6px; }
+      .cbx-list { max-height: 240px; overflow: auto; padding: 6px 0; }
+      .cbx-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; cursor: pointer; }
+      .cbx-item:hover { background: #f5f5f5; }
+      .cbx-check { opacity: 0; }
+      .cbx-item[aria-selected="true"] .cbx-check { opacity: 1; }
+      .cbx-empty { padding: 10px; color: #666; }
+      @media (prefers-color-scheme: dark) {
+        body { color: #eee; background: #111; }
+        .combobox-trigger { border-color: #333; background: #1a1a1a; color: #eee; }
+        .cbx-dropdown { background: #1a1a1a; border-color: #333; box-shadow: 0 6px 24px rgba(0,0,0,0.5); }
+        .cbx-search-wrapper { border-bottom-color: #2a2a2a; }
+        .cbx-search { background: #111; color: #eee; border-color: #333; }
+        .cbx-item:hover { background: #222; }
+        .cbx-empty { color: #aaa; }
+      }
     </style>
   </head>
   <body>
@@ -26,7 +48,19 @@
         <button id="refresh" title="Refresh">🔄</button>
       </div>
       <div class="row" style="margin-top:8px">
-        <select id="databases"></select>
+        <div class="combobox" id="dbCombobox">
+          <button id="dbComboTrigger" class="combobox-trigger" aria-expanded="false">
+            <span id="dbComboLabel">Select database...</span>
+            <span class="chevron">▾</span>
+          </button>
+          <div id="dbComboDropdown" class="cbx-dropdown" role="listbox" aria-hidden="true">
+            <div class="cbx-search-wrapper">
+              <input id="dbComboSearch" class="cbx-search" placeholder="Search database..." />
+            </div>
+            <div id="dbComboList" class="cbx-list"></div>
+            <div id="dbComboEmpty" class="cbx-empty" style="display:none">No databases found.</div>
+          </div>
+        </div>
       </div>
       <div style="margin-top:8px">
         <textarea id="note" placeholder="Optional note (extra context for the AI; it will NOT be added to the Notion page)"></textarea>

@@ -21,6 +21,130 @@ function formatModelLabel(provider, model) {
   return 'Selected model';
 }
 
+// --- Combobox state ---
+let dbList = [];
+let dbFiltered = [];
+let dbSelectedId = '';
+let comboOpen = false;
+let comboboxHandlersAttached = false;
+
+function getDbElements() {
+  return {
+    trigger: document.getElementById('dbComboTrigger'),
+    dropdown: document.getElementById('dbComboDropdown'),
+    list: document.getElementById('dbComboList'),
+    empty: document.getElementById('dbComboEmpty'),
+    label: document.getElementById('dbComboLabel'),
+    search: document.getElementById('dbComboSearch')
+  };
+}
+
+function setComboOpen(open) {
+  const { trigger, dropdown } = getDbElements();
+  comboOpen = !!open;
+  trigger.setAttribute('aria-expanded', comboOpen ? 'true' : 'false');
+  dropdown.style.display = comboOpen ? 'block' : 'none';
+  dropdown.setAttribute('aria-hidden', comboOpen ? 'false' : 'true');
+  if (comboOpen) {
+    // Focus search on open
+    setTimeout(() => getDbElements().search?.focus(), 0);
+  }
+}
+
+function renderDbList(items) {
+  const { list, empty } = getDbElements();
+  list.innerHTML = '';
+  if (!Array.isArray(items) || items.length === 0) {
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+  for (const db of items) {
+    const row = document.createElement('div');
+    row.className = 'cbx-item';
+    row.setAttribute('role', 'option');
+    row.dataset.id = db.id;
+    const emoji = db.iconEmoji || '';
+    const left = document.createElement('span');
+    left.textContent = (emoji ? `${emoji} ` : '') + db.title;
+    const check = document.createElement('span');
+    check.textContent = '✓';
+    check.className = 'cbx-check';
+    row.appendChild(left);
+    row.appendChild(check);
+    if (dbSelectedId && dbSelectedId === db.id) row.setAttribute('aria-selected', 'true');
+    row.addEventListener('click', () => {
+      setSelectedDb(db.id);
+      setComboOpen(false);
+    });
+    list.appendChild(row);
+  }
+}
+
+function setSelectedDb(id) {
+  dbSelectedId = id || '';
+  const { label, list } = getDbElements();
+  const found = dbList.find((d) => d.id === dbSelectedId);
+  label.textContent = found ? `${found.iconEmoji ? found.iconEmoji + ' ' : ''}${found.title}` : 'Select database...';
+  // update selection check
+  Array.from(list.querySelectorAll('.cbx-item')).forEach((el) => {
+    if (el.dataset.id === dbSelectedId) el.setAttribute('aria-selected', 'true');
+    else el.removeAttribute('aria-selected');
+  });
+}
+
+function filterDbList(term) {
+  const t = String(term || '').toLowerCase();
+  if (!t) {
+    dbFiltered = dbList.slice();
+  } else {
+    dbFiltered = dbList.filter((d) => {
+      const s = `${d.title} ${d.iconEmoji || ''}`.toLowerCase();
+      return s.includes(t);
+    });
+  }
+  renderDbList(dbFiltered);
+}
+
+function attachComboboxHandlers() {
+  if (comboboxHandlersAttached) return;
+  comboboxHandlersAttached = true;
+  const { trigger, search, dropdown, list } = getDbElements();
+  trigger.addEventListener('click', () => setComboOpen(!comboOpen));
+  search.addEventListener('input', (e) => filterDbList(e.target.value));
+  // Keyboard navigation
+  trigger.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      setComboOpen(true);
+    }
+  });
+  dropdown.addEventListener('keydown', (e) => {
+    const items = Array.from(list.querySelectorAll('.cbx-item'));
+    const currentIndex = items.findIndex((el) => el.dataset.id === dbSelectedId);
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const next = items[Math.min(items.length - 1, currentIndex + 1)] || items[0];
+      if (next) setSelectedDb(next.dataset.id);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      const prev = items[Math.max(0, currentIndex - 1)] || items[items.length - 1];
+      if (prev) setSelectedDb(prev.dataset.id);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      setComboOpen(false);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setComboOpen(false);
+    }
+  });
+  // Close on outside click
+  document.addEventListener('click', (e) => {
+    const root = document.getElementById('dbCombobox');
+    if (!root.contains(e.target)) setComboOpen(false);
+  });
+}
+
 async function precheck() {
   const pre = document.getElementById('precheck');
   const app = document.getElementById('app');
@@ -55,26 +179,44 @@ async function listDatabases(query) {
   return res.databases;
 }
 
+function orderDatabasesByRecentUsage(list, recentSaves, lastDatabaseId) {
+  const byIdLatestTs = new Map();
+  for (const it of Array.isArray(recentSaves) ? recentSaves : []) {
+    if (!it?.databaseId) continue;
+    const ts = typeof it.ts === 'number' ? it.ts : 0;
+    const prev = byIdLatestTs.get(it.databaseId) || 0;
+    if (ts > prev) byIdLatestTs.set(it.databaseId, ts);
+  }
+  const scored = list.map((d) => {
+    const score = byIdLatestTs.get(d.id) || 0;
+    const lastBoost = d.id === lastDatabaseId ? 1 : 0; // tie-breaker
+    return { d, score, lastBoost };
+  });
+  scored.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    if (b.lastBoost !== a.lastBoost) return b.lastBoost - a.lastBoost;
+    return String(a.d.title || '').localeCompare(String(b.d.title || ''));
+  });
+  return scored.map((s) => s.d);
+}
+
 async function loadDatabases() {
   const search = document.getElementById('search');
-  const sel = document.getElementById('databases');
-  sel.innerHTML = '';
   console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Loading databases…`);
-  const list = await listDatabases(search.value.trim());
-  if (!list.length) {
-    sel.innerHTML = '<option>(No databases are shared with your integration)</option>';
-    sel.disabled = true;
-    return;
-  }
-  sel.disabled = false;
-  list.forEach((db) => {
-    const opt = document.createElement('option');
-    opt.value = db.id;
-    const emoji = db.iconEmoji || '';
-    opt.textContent = (emoji ? `${emoji} ` : '') + db.title;
-    sel.appendChild(opt);
-  });
-  console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Databases loaded:`, list.length);
+  const [list, stored] = await Promise.all([
+    listDatabases(search.value.trim()),
+    getStorage(['recentSaves', 'lastDatabaseId'])
+  ]);
+  dbList = Array.isArray(list) ? list.slice() : [];
+  // Order by recent usage; boost lastDatabaseId
+  dbList = orderDatabasesByRecentUsage(dbList, stored.recentSaves || [], stored.lastDatabaseId || '');
+  dbFiltered = dbList.slice();
+  renderDbList(dbFiltered);
+  attachComboboxHandlers();
+  // Preselect last used or first
+  const pre = stored.lastDatabaseId && dbList.find((d) => d.id === stored.lastDatabaseId) ? stored.lastDatabaseId : (dbList[0]?.id || '');
+  setSelectedDb(pre);
+  console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Databases loaded:`, dbList.length);
 }
 
 async function getPageContext(tabId) {
@@ -102,9 +244,8 @@ async function getPageContext(tabId) {
 async function save() {
   const status = document.getElementById('status');
   status.textContent = '';
-  const dbSel = document.getElementById('databases');
   const { llmProvider, llmModel } = await getStorage(['llmProvider', 'llmModel']);
-  const databaseId = dbSel.value;
+  const databaseId = dbSelectedId;
   if (!databaseId) {
     status.textContent = 'Debes seleccionar una base de datos.';
     return;
@@ -159,6 +300,8 @@ async function save() {
   const pageUrl = res?.page?.url || res?.page?.public_url;
   const seconds = Math.max(0, Math.round((Date.now() - startedAt) / 1000));
   status.innerHTML = `<span class="success">Saved successfully in ${seconds} seconds ✅</span>` + (pageUrl ? `<div class="success-link"><a href="${pageUrl}" target="_blank" rel="noopener noreferrer">Open in Notion ↗</a></div>` : '');
+  // Remember last used database for next session and ordering boost
+  await setStorage({ lastDatabaseId: databaseId });
 }
 
 async function main() {
