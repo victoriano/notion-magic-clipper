@@ -62,7 +62,7 @@ async function getConfig() {
 // Notion API helpers
 async function notionFetch(path, options = {}) {
   const { notionToken } = await getConfig();
-  if (!notionToken) throw new Error('Falta el token de Notion. Configúralo en Opciones.');
+  if (!notionToken) throw new Error('Missing Notion token. Configure it.');
 
   const headers = {
     'Authorization': `Bearer ${notionToken}`,
@@ -99,7 +99,8 @@ async function listDatabases(query = '') {
       .map((t) => t.plain_text)
       .join('') || '(Sin título)';
     const iconEmoji = item?.icon?.type === 'emoji' ? item.icon.emoji : undefined;
-    return { id: item.id, title, iconEmoji };
+    const url = item?.url || `https://www.notion.so/${String(item?.id || '').replace(/-/g, '')}`;
+    return { id: item.id, title, iconEmoji, url };
   });
   return results;
 }
@@ -780,7 +781,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === 'LIST_UNTITLED_DATABASES') {
       try {
         const { notionToken } = await getConfig();
-        if (!notionToken) throw new Error('Falta el token de Notion. Configúralo en Opciones.');
+        if (!notionToken) throw new Error('Missing Notion token. Configure it.');
         const list = await searchUntitledDatabases(notionToken);
         sendResponse({ ok: true, databases: list });
       } catch (e) {
@@ -792,7 +793,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === 'LIST_ALL_DATABASES') {
       try {
         const { notionToken, notionSearchQuery } = await getConfig();
-        if (!notionToken) throw new Error('Falta el token de Notion. Configúralo en Opciones.');
+        if (!notionToken) throw new Error('Missing Notion token. Configure it.');
         const list = await searchAllDatabases(notionToken, { query: message.query ?? notionSearchQuery ?? '' });
         sendResponse({ ok: true, databases: list });
       } catch (e) {

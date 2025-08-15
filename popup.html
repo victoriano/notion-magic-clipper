@@ -10,11 +10,15 @@
       select, input, button, textarea { width: 100%; padding: 6px; font-size: 14px; box-sizing: border-box; }
       button { cursor: pointer; }
       small { color: #666; }
+      label { display: block; margin: 8px 0 4px; font-weight: 600; }
       .error { color: #b00020; }
       .success { color: #0b7a0b; }
       .link { color: #1976d2; cursor: pointer; text-decoration: underline; }
       #status { margin-top: 8px; min-height: 1.2em; }
       #note { height: 60px; padding: 6px 10px; border: 1px solid #ccc; border-radius: 8px; background: #fff; color: #111; }
+      .indicator { width: 16px; height: 16px; padding: 0; border-radius: 999px; border: none; background: #bbb; box-shadow: inset 0 0 0 2px rgba(0,0,0,0.06); cursor: pointer; width: 16px !important; }
+      .indicator.ok { background: #16a34a; }
+      .indicator.err { background: #dc2626; }
       /* Combobox (shadcn-like) */
       .combobox { position: relative; width: 100%; }
       .combobox-trigger { width: 100%; display: flex; justify-content: space-between; align-items: center; border: 1px solid #ccc; border-radius: 8px; background: #fff; color: #111; padding: 6px 10px; }
@@ -31,8 +35,11 @@
     </style>
   </head>
   <body>
-    <h3 style="margin-top:0">Notion Magic Clipper</h3>
-    <div id="precheck"></div>
+    <div class="row" style="justify-content: space-between; align-items: center; margin-bottom: 4px">
+      <h3 style="margin-top:0; margin-bottom: 0">Notion Magic Clipper</h3>
+      <button id="statusIndicator" class="indicator" title="Checking tokens…" aria-label="Token status"></button>
+    </div>
+    <div id="precheck" style="display:none"></div>
     <div id="app" style="display:none">
       <div class="row" style="margin-top:8px">
         <div class="combobox" id="dbCombobox">
@@ -49,6 +56,9 @@
           </div>
         </div>
       </div>
+      <div style="margin-top:4px">
+        <button id="openDbSettings" style="width:auto; padding:0; background:none; border:none; color:#1976d2; text-decoration:underline">Custom save format</button>
+      </div>
       <div style="margin-top:8px">
         <textarea id="note" placeholder="Optional extra context for the AI"></textarea>
       </div>
@@ -57,9 +67,6 @@
         <button id="save">Save to Notion</button>
       </div>
       <div id="status"></div>
-      <div style="margin-top:10px">
-        <small>Tokens not configured? Open <span id="openOptions" class="link">Options</span>.</small>
-      </div>
       <button id="openHistory" title="Recent saves" style="position: fixed; right: 8px; bottom: 8px; background: transparent; border: none; padding: 0; font-size: 18px; line-height: 1; width: auto; height: auto; -webkit-appearance: none; appearance: none;">🕒</button>
     </div>
 
@@ -71,6 +78,55 @@
         <button id="backToMain">← Back</button>
         <button id="clearHistory" style="width:auto">Clear</button>
       </div>
+    </div>
+    <div id="tokensView" style="display:none">
+      <h3 style="margin-top:0">Tokens</h3>
+      <label for="tNotionToken">Notion Integration Token</label>
+      <input id="tNotionToken" type="password" placeholder="secret_..." />
+      <small>
+        Create an <b>Internal Integration</b> and copy its token:
+        <a href="https://www.notion.so/my-integrations" target="_blank" rel="noreferrer">my-integrations</a>.
+        Then share your databases with that integration. Docs:
+        <a href="https://www.notion.com/help/create-integrations-with-the-notion-api" target="_blank" rel="noreferrer">Notion Help</a>.
+      </small>
+      <label for="tOpenAI">OpenAI API Key</label>
+      <input id="tOpenAI" type="password" placeholder="sk-..." />
+      <small>Your API key is stored in the extension's local storage.</small>
+      <label for="tGoogle">Google AI API Key</label>
+      <input id="tGoogle" type="password" placeholder="AIza..." />
+      <small>Create a key in Google AI Studio and paste it here. It will be stored locally.</small>
+      <label for="tModel">Model</label>
+      <select id="tModel"></select>
+      <small>Pick the model to use. Make sure the corresponding API key is configured above.</small>
+      <div class="row" style="margin-top:8px">
+        <button id="tokensBack">← Back</button>
+        <button id="tokensSave" style="width:auto">Save</button>
+      </div>
+      <div id="tokensStatus"></div>
+      <div style="margin-top:10px">
+        <small>Want more settings? Open the <span id="tokensOpenOptions" class="link">full Options</span>.</small>
+      </div>
+    </div>
+    <div id="dbSettingsView" style="display:none">
+      <h3 style="margin-top:0">Database settings</h3>
+      <div id="dbSettingsDbName" style="margin-bottom:8px; color:#555"></div>
+      <label for="dbsPrompt">Custom instructions</label>
+      <textarea id="dbsPrompt" rows="4" style="width:100%" placeholder="Custom instructions for this database (how to map, which properties to prioritize, etc.)"></textarea>
+      <label id="dbsSaveArticleLabel" style="display:flex; align-items:center; gap:6px; margin-top:8px">
+        <input id="dbsSaveArticle" type="checkbox" />
+        <span>Save article content as page content (default on)</span>
+      </label>
+      <label id="dbsCustomizeLabel" style="display:none; align-items:center; gap:6px; margin-top:8px">
+        <input id="dbsCustomize" type="checkbox" />
+        <span>Customize content page</span>
+      </label>
+      <textarea id="dbsContentPrompt" rows="3" style="width:100%; display:none" placeholder="Content customization for article children (e.g., write a concise summary with key points, extract pricing table, etc.)"></textarea>
+      <div class="row" style="margin-top:8px">
+        <button id="dbsBack">← Back</button>
+        <button id="dbsSave" style="width:auto">Save</button>
+        <button id="dbsClear" style="width:auto">Clear</button>
+      </div>
+      <div id="dbsStatus"></div>
     </div>
     <script src="popup.js" type="module"></script>
   </body>
