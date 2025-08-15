@@ -21,9 +21,138 @@ function formatModelLabel(provider, model) {
   return 'Selected model';
 }
 
-async function precheck() {
+// --- Combobox state ---
+let dbList = [];
+let dbFiltered = [];
+let dbSelectedId = '';
+let comboOpen = false;
+let comboboxHandlersAttached = false;
+let needsReloadDatabases = false;
+
+function getDbElements() {
+  return {
+    trigger: document.getElementById('dbComboTrigger'),
+    dropdown: document.getElementById('dbComboDropdown'),
+    list: document.getElementById('dbComboList'),
+    empty: document.getElementById('dbComboEmpty'),
+    label: document.getElementById('dbComboLabel'),
+    search: document.getElementById('dbComboSearch')
+  };
+}
+
+function setComboOpen(open) {
+  const { trigger, dropdown } = getDbElements();
+  comboOpen = !!open;
+  trigger.setAttribute('aria-expanded', comboOpen ? 'true' : 'false');
+  dropdown.style.display = comboOpen ? 'block' : 'none';
+  dropdown.setAttribute('aria-hidden', comboOpen ? 'false' : 'true');
+  if (comboOpen) {
+    // Focus search on open
+    setTimeout(() => getDbElements().search?.focus(), 0);
+  }
+}
+
+function renderDbList(items) {
+  const { list, empty } = getDbElements();
+  list.innerHTML = '';
+  if (!Array.isArray(items) || items.length === 0) {
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+  for (const db of items) {
+    const row = document.createElement('div');
+    row.className = 'cbx-item';
+    row.setAttribute('role', 'option');
+    row.dataset.id = db.id;
+    const emoji = db.iconEmoji || '';
+    const left = document.createElement('span');
+    left.textContent = (emoji ? `${emoji} ` : '') + db.title;
+    const check = document.createElement('span');
+    check.textContent = '✓';
+    check.className = 'cbx-check';
+    row.appendChild(left);
+    row.appendChild(check);
+    if (dbSelectedId && dbSelectedId === db.id) row.setAttribute('aria-selected', 'true');
+    row.addEventListener('click', () => {
+      setSelectedDb(db.id);
+      setComboOpen(false);
+    });
+    list.appendChild(row);
+  }
+}
+
+function setSelectedDb(id) {
+  dbSelectedId = id || '';
+  const { label, list } = getDbElements();
+  const found = dbList.find((d) => d.id === dbSelectedId);
+  label.textContent = found ? `${found.iconEmoji ? found.iconEmoji + ' ' : ''}${found.title}` : 'Select database...';
+  // update selection check
+  Array.from(list.querySelectorAll('.cbx-item')).forEach((el) => {
+    if (el.dataset.id === dbSelectedId) el.setAttribute('aria-selected', 'true');
+    else el.removeAttribute('aria-selected');
+  });
+  // update settings link label
+  const openBtn = document.getElementById('openDbSettings');
+  if (openBtn) openBtn.textContent = 'Custom save format';
+}
+
+function filterDbList(term) {
+  const t = String(term || '').toLowerCase();
+  if (!t) {
+    dbFiltered = dbList.slice();
+  } else {
+    dbFiltered = dbList.filter((d) => {
+      const s = `${d.title} ${d.iconEmoji || ''}`.toLowerCase();
+      return s.includes(t);
+    });
+  }
+  renderDbList(dbFiltered);
+}
+
+function attachComboboxHandlers() {
+  if (comboboxHandlersAttached) return;
+  comboboxHandlersAttached = true;
+  const { trigger, search, dropdown, list } = getDbElements();
+  trigger.addEventListener('click', () => setComboOpen(!comboOpen));
+  search.addEventListener('input', (e) => filterDbList(e.target.value));
+  // Keyboard navigation
+  trigger.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      setComboOpen(true);
+    }
+  });
+  dropdown.addEventListener('keydown', (e) => {
+    const items = Array.from(list.querySelectorAll('.cbx-item'));
+    const currentIndex = items.findIndex((el) => el.dataset.id === dbSelectedId);
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const next = items[Math.min(items.length - 1, currentIndex + 1)] || items[0];
+      if (next) setSelectedDb(next.dataset.id);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      const prev = items[Math.max(0, currentIndex - 1)] || items[items.length - 1];
+      if (prev) setSelectedDb(prev.dataset.id);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      setComboOpen(false);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setComboOpen(false);
+    }
+  });
+  // Close on outside click
+  document.addEventListener('click', (e) => {
+    const root = document.getElementById('dbCombobox');
+    if (!root.contains(e.target)) setComboOpen(false);
+  });
+}
+
+async function precheck(opts = {}) {
   const pre = document.getElementById('precheck');
   const app = document.getElementById('app');
+  const indicator = document.getElementById('statusIndicator');
   const cfg = await getStorage(['notionToken', 'openaiKey', 'googleApiKey', 'llmProvider', 'llmModel']);
   const provider = cfg.llmProvider || 'openai';
   const model = cfg.llmModel || 'gpt-5-nano';
@@ -34,13 +163,50 @@ async function precheck() {
   if (provider === 'openai') hasLLM = hasOpenAI;
   else if (provider === 'google') hasLLM = hasGoogle;
   else hasLLM = hasOpenAI || hasGoogle; // fallback if unknown provider
-  if (!hasNotion || !hasLLM) {
-    pre.innerHTML = `<div class="error">${!hasNotion ? 'Notion token missing. ' : ''}${!hasLLM ? 'LLM key missing for selected provider.' : ''} Open <b>Options</b> to configure.</div>`;
-  } else {
-    pre.innerHTML = `<div class="success">Tokens configured. Ready to save.</div>`;
+  const ok = hasNotion && hasLLM;
+  if (indicator) {
+    indicator.classList.toggle('ok', ok);
+    indicator.classList.toggle('err', !ok);
+    indicator.title = ok ? 'Tokens configured' : 'Tokens missing — click to configure';
+    indicator.setAttribute('aria-label', indicator.title);
   }
-  app.style.display = 'block';
+  if (!opts.preserveViews) app.style.display = 'block';
   console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] precheck complete`);
+}
+
+// Open the Tokens configuration view from anywhere
+async function openTokensView() {
+  const tokensView = document.getElementById('tokensView');
+  const tokensStatus = document.getElementById('tokensStatus');
+  const tModel = document.getElementById('tModel');
+  const appView = document.getElementById('app');
+  const notionInput = document.getElementById('tNotionToken');
+  const openaiInput = document.getElementById('tOpenAI');
+  const googleInput = document.getElementById('tGoogle');
+
+  const { notionToken, openaiKey, googleApiKey, llmProvider, llmModel } = await getStorage(['notionToken', 'openaiKey', 'googleApiKey', 'llmProvider', 'llmModel']);
+  if (notionInput) notionInput.value = notionToken || '';
+  if (openaiInput) openaiInput.value = openaiKey || '';
+  if (googleInput) googleInput.value = googleApiKey || '';
+
+  // Populate model selector based on available keys
+  const options = [];
+  if (openaiKey) options.push({ value: 'openai:gpt-5-nano', label: 'OpenAI · GPT-5 Nano' });
+  if (googleApiKey) options.push({ value: 'google:gemini-2.5-flash', label: 'Google · Gemini 2.5 Flash' });
+  if (options.length === 0) options.push({ value: 'openai:gpt-5-nano', label: 'OpenAI · GPT-5 Nano' });
+  if (tModel) {
+    tModel.innerHTML = '';
+    for (const o of options) {
+      const opt = document.createElement('option');
+      opt.value = o.value; opt.textContent = o.label; tModel.appendChild(opt);
+    }
+    const desired = `${llmProvider || 'openai'}:${llmModel || 'gpt-5-nano'}`;
+    const found = Array.from(tModel.options).some((o) => o.value === desired);
+    tModel.value = found ? desired : options[0].value;
+  }
+  if (appView) appView.style.display = 'none';
+  if (tokensStatus) tokensStatus.textContent = '';
+  if (tokensView) tokensView.style.display = 'block';
 }
 
 async function listDatabases(query) {
@@ -48,33 +214,57 @@ async function listDatabases(query) {
   status.textContent = 'Loading databases...';
   const res = await chrome.runtime.sendMessage({ type: 'LIST_DATABASES', query });
   if (!res?.ok) {
-    status.textContent = res?.error || 'Error listing databases';
+    const err = res?.error || '';
+    if (/Missing Notion token/i.test(err)) {
+      status.innerHTML = 'Missing Notion token. <a href="#" id="openTokensFromStatus">Configure it</a>.';
+      const link = document.getElementById('openTokensFromStatus');
+      if (link) link.addEventListener('click', (e) => { e.preventDefault(); openTokensView(); });
+    } else {
+      status.textContent = err || 'Error listing databases';
+    }
     return [];
   }
   status.textContent = '';
   return res.databases;
 }
 
-async function loadDatabases() {
-  const search = document.getElementById('search');
-  const sel = document.getElementById('databases');
-  sel.innerHTML = '';
-  console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Loading databases…`);
-  const list = await listDatabases(search.value.trim());
-  if (!list.length) {
-    sel.innerHTML = '<option>(No databases are shared with your integration)</option>';
-    sel.disabled = true;
-    return;
+function orderDatabasesByRecentUsage(list, recentSaves, lastDatabaseId) {
+  const byIdLatestTs = new Map();
+  for (const it of Array.isArray(recentSaves) ? recentSaves : []) {
+    if (!it?.databaseId) continue;
+    const ts = typeof it.ts === 'number' ? it.ts : 0;
+    const prev = byIdLatestTs.get(it.databaseId) || 0;
+    if (ts > prev) byIdLatestTs.set(it.databaseId, ts);
   }
-  sel.disabled = false;
-  list.forEach((db) => {
-    const opt = document.createElement('option');
-    opt.value = db.id;
-    const emoji = db.iconEmoji || '';
-    opt.textContent = (emoji ? `${emoji} ` : '') + db.title;
-    sel.appendChild(opt);
+  const scored = list.map((d) => {
+    const score = byIdLatestTs.get(d.id) || 0;
+    const lastBoost = d.id === lastDatabaseId ? 1 : 0; // tie-breaker
+    return { d, score, lastBoost };
   });
-  console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Databases loaded:`, list.length);
+  scored.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    if (b.lastBoost !== a.lastBoost) return b.lastBoost - a.lastBoost;
+    return String(a.d.title || '').localeCompare(String(b.d.title || ''));
+  });
+  return scored.map((s) => s.d);
+}
+
+async function loadDatabases() {
+  console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Loading databases…`);
+  const [list, stored] = await Promise.all([
+    listDatabases(''),
+    getStorage(['recentSaves', 'lastDatabaseId'])
+  ]);
+  dbList = Array.isArray(list) ? list.slice() : [];
+  // Order by recent usage; boost lastDatabaseId
+  dbList = orderDatabasesByRecentUsage(dbList, stored.recentSaves || [], stored.lastDatabaseId || '');
+  dbFiltered = dbList.slice();
+  renderDbList(dbFiltered);
+  attachComboboxHandlers();
+  // Preselect last used or first
+  const pre = stored.lastDatabaseId && dbList.find((d) => d.id === stored.lastDatabaseId) ? stored.lastDatabaseId : (dbList[0]?.id || '');
+  setSelectedDb(pre);
+  console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Databases loaded:`, dbList.length);
 }
 
 async function getPageContext(tabId) {
@@ -102,9 +292,8 @@ async function getPageContext(tabId) {
 async function save() {
   const status = document.getElementById('status');
   status.textContent = '';
-  const dbSel = document.getElementById('databases');
   const { llmProvider, llmModel } = await getStorage(['llmProvider', 'llmModel']);
-  const databaseId = dbSel.value;
+  const databaseId = dbSelectedId;
   if (!databaseId) {
     status.textContent = 'Debes seleccionar una base de datos.';
     return;
@@ -159,24 +348,122 @@ async function save() {
   const pageUrl = res?.page?.url || res?.page?.public_url;
   const seconds = Math.max(0, Math.round((Date.now() - startedAt) / 1000));
   status.innerHTML = `<span class="success">Saved successfully in ${seconds} seconds ✅</span>` + (pageUrl ? `<div class="success-link"><a href="${pageUrl}" target="_blank" rel="noopener noreferrer">Open in Notion ↗</a></div>` : '');
+  // Remember last used database for next session and ordering boost
+  await setStorage({ lastDatabaseId: databaseId });
 }
 
 async function main() {
   await precheck();
   await loadDatabases();
 
-  document.getElementById('refresh').addEventListener('click', loadDatabases);
-  document.getElementById('search').addEventListener('change', async (e) => {
-    await setStorage({ notionSearchQuery: e.target.value });
-    await loadDatabases();
-  });
+  // removed top search/refresh controls
   document.getElementById('save').addEventListener('click', save);
-  document.getElementById('openOptions').addEventListener('click', () => chrome.runtime.openOptionsPage());
+  // full Options link moved to tokens view
+
+  // Inline tokens mini-page
+  const indicator = document.getElementById('statusIndicator');
+  const tokensView = document.getElementById('tokensView');
+  const tokensBack = document.getElementById('tokensBack');
+  const tokensSave = document.getElementById('tokensSave');
+  const tokensOpenOptions = document.getElementById('tokensOpenOptions');
+  const tokensStatus = document.getElementById('tokensStatus');
+  const tModel = document.getElementById('tModel');
+  const appView = document.getElementById('app');
+  const dbSettingsView = document.getElementById('dbSettingsView');
+  const openDbSettings = document.getElementById('openDbSettings');
+  const dbsBack = document.getElementById('dbsBack');
+  const dbsSave = document.getElementById('dbsSave');
+  const dbsClear = document.getElementById('dbsClear');
+  const dbsStatus = document.getElementById('dbsStatus');
+  const dbsPrompt = document.getElementById('dbsPrompt');
+  const dbsSaveArticle = document.getElementById('dbsSaveArticle');
+  const dbsCustomize = document.getElementById('dbsCustomize');
+  const dbsCustomizeLabel = document.getElementById('dbsCustomizeLabel');
+  const dbsContentPrompt = document.getElementById('dbsContentPrompt');
+  const dbSettingsDbName = document.getElementById('dbSettingsDbName');
+  if (indicator) {
+    indicator.addEventListener('click', async () => { await openTokensView(); });
+  }
+  if (tokensBack) tokensBack.addEventListener('click', async () => {
+    tokensView.style.display = 'none';
+    appView.style.display = 'block';
+    if (needsReloadDatabases) {
+      needsReloadDatabases = false;
+      await loadDatabases();
+    }
+  });
+  if (tokensOpenOptions) tokensOpenOptions.addEventListener('click', () => chrome.runtime.openOptionsPage());
+  if (tokensSave) tokensSave.addEventListener('click', async () => {
+    tokensStatus.textContent = '';
+    const notionToken = document.getElementById('tNotionToken').value.trim();
+    const openaiKey = document.getElementById('tOpenAI').value.trim();
+    const googleApiKey = document.getElementById('tGoogle').value.trim();
+    const [provider, ...rest] = String(tModel?.value || 'openai:gpt-5-nano').split(':');
+    const llmProvider = provider || 'openai';
+    const llmModel = rest.join(':') || 'gpt-5-nano';
+    await setStorage({ notionToken, openaiKey, googleApiKey, llmProvider, llmModel });
+    tokensStatus.textContent = 'Saved ✓';
+    await precheck({ preserveViews: true });
+    needsReloadDatabases = true;
+  });
+
+  // Database settings mini-page
+  function updateCustomizeVisibility() {
+    if (!dbsSaveArticle || !dbsCustomize || !dbsCustomizeLabel || !dbsContentPrompt) return;
+    const checked = dbsSaveArticle.checked;
+    dbsCustomizeLabel.style.display = checked ? 'flex' : 'none';
+    dbsContentPrompt.style.display = (checked && dbsCustomize.checked) ? 'block' : 'none';
+  }
+  if (dbsSaveArticle) dbsSaveArticle.addEventListener('change', updateCustomizeVisibility);
+  if (dbsCustomize) dbsCustomize.addEventListener('change', updateCustomizeVisibility);
+  if (openDbSettings) openDbSettings.addEventListener('click', async () => {
+    dbsStatus.textContent = '';
+    const currentDb = dbList.find((d) => d.id === dbSelectedId);
+    // clickable link to Notion database
+    if (currentDb && currentDb.url) {
+      dbSettingsDbName.innerHTML = `<a href="${currentDb.url}" target="_blank" rel="noopener noreferrer">${currentDb.iconEmoji ? currentDb.iconEmoji + ' ' : ''}${currentDb.title} ↗</a>`;
+    } else {
+      dbSettingsDbName.textContent = currentDb ? `${currentDb.iconEmoji ? currentDb.iconEmoji + ' ' : ''}${currentDb.title}` : '';
+    }
+    const { databaseSettings } = await getStorage(['databaseSettings']);
+    const settingsForDb = (databaseSettings || {})[dbSelectedId] || {};
+    dbsPrompt.value = settingsForDb.prompt || '';
+    dbsSaveArticle.checked = settingsForDb.saveArticle !== false;
+    dbsCustomize.checked = settingsForDb.customizeContent === true;
+    dbsContentPrompt.value = settingsForDb.contentPrompt || '';
+    updateCustomizeVisibility();
+    appView.style.display = 'none';
+    dbSettingsView.style.display = 'block';
+  });
+  if (dbsBack) dbsBack.addEventListener('click', () => { dbSettingsView.style.display = 'none'; appView.style.display = 'block'; });
+  if (dbsSave) dbsSave.addEventListener('click', async () => {
+    const { databaseSettings } = await getStorage(['databaseSettings']);
+    const map = (databaseSettings && typeof databaseSettings === 'object') ? databaseSettings : {};
+    map[dbSelectedId] = {
+      prompt: (dbsPrompt.value || '').trim(),
+      saveArticle: !!dbsSaveArticle.checked,
+      customizeContent: !!dbsCustomize.checked,
+      contentPrompt: (dbsContentPrompt.value || '').trim()
+    };
+    await setStorage({ databaseSettings: map });
+    dbsStatus.textContent = 'Saved ✓';
+  });
+  if (dbsClear) dbsClear.addEventListener('click', async () => {
+    const { databaseSettings } = await getStorage(['databaseSettings']);
+    const map = (databaseSettings && typeof databaseSettings === 'object') ? databaseSettings : {};
+    map[dbSelectedId] = { prompt: '', saveArticle: true, customizeContent: false, contentPrompt: '' };
+    await setStorage({ databaseSettings: map });
+    dbsPrompt.value = '';
+    dbsSaveArticle.checked = true;
+    dbsCustomize.checked = false;
+    dbsContentPrompt.value = '';
+    updateCustomizeVisibility();
+    dbsStatus.textContent = 'Cleared';
+  });
 
   // History view navigation
   const openHistoryBtn = document.getElementById('openHistory');
   const historyView = document.getElementById('historyView');
-  const appView = document.getElementById('app');
   const historyList = document.getElementById('historyList');
   const historyStatus = document.getElementById('historyStatus');
   const backBtn = document.getElementById('backToMain');

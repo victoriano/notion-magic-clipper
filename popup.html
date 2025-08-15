@@ -5,40 +5,68 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Notion Magic Clipper</title>
     <style>
-      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif; margin: 12px; min-width: 300px; }
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif; margin: 12px; min-width: 300px; background: #fff; color: #111; }
       .row { display: flex; gap: 8px; align-items: center; }
-      select, input, button, textarea { width: 100%; padding: 6px; font-size: 14px; }
+      select, input, button, textarea { width: 100%; padding: 6px; font-size: 14px; box-sizing: border-box; }
       button { cursor: pointer; }
       small { color: #666; }
+      label { display: block; margin: 8px 0 4px; font-weight: 600; }
       .error { color: #b00020; }
       .success { color: #0b7a0b; }
       .link { color: #1976d2; cursor: pointer; text-decoration: underline; }
       #status { margin-top: 8px; min-height: 1.2em; }
-      #note { height: 60px; }
+      #note { height: 60px; padding: 6px 10px; border: 1px solid #ccc; border-radius: 8px; background: #fff; color: #111; }
+      .indicator { width: 16px; height: 16px; padding: 0; border-radius: 999px; border: none; background: #bbb; box-shadow: inset 0 0 0 2px rgba(0,0,0,0.06); cursor: pointer; width: 16px !important; }
+      .indicator.ok { background: #16a34a; }
+      .indicator.err { background: #dc2626; }
+      /* Combobox (shadcn-like) */
+      .combobox { position: relative; width: 100%; }
+      .combobox-trigger { width: 100%; display: flex; justify-content: space-between; align-items: center; border: 1px solid #ccc; border-radius: 8px; background: #fff; color: #111; padding: 6px 10px; }
+      .combobox-trigger .chevron { opacity: 0.6; }
+      .cbx-dropdown { position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: #fff; border: 1px solid #ddd; border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,0.12); z-index: 1000; display: none; }
+      .cbx-search-wrapper { padding: 6px; border-bottom: 1px solid #eee; }
+      .cbx-search { width: 100%; padding: 6px 8px; border: 1px solid #ddd; border-radius: 6px; }
+      .cbx-list { max-height: 240px; overflow: auto; padding: 6px 0; }
+      .cbx-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; cursor: pointer; }
+      .cbx-item:hover { background: #f5f5f5; }
+      .cbx-check { opacity: 0; }
+      .cbx-item[aria-selected="true"] .cbx-check { opacity: 1; }
+      .cbx-empty { padding: 10px; color: #666; }
     </style>
   </head>
   <body>
-    <h3 style="margin-top:0">Notion Magic Clipper</h3>
-    <div id="precheck"></div>
+    <div class="row" style="justify-content: space-between; align-items: center; margin-bottom: 4px">
+      <h3 style="margin-top:0; margin-bottom: 0">Notion Magic Clipper</h3>
+      <button id="statusIndicator" class="indicator" title="Checking tokens…" aria-label="Token status"></button>
+    </div>
+    <div id="precheck" style="display:none"></div>
     <div id="app" style="display:none">
-      <div class="row">
-        <input id="search" placeholder="Search databases (optional)" />
-        <button id="refresh" title="Refresh">🔄</button>
-      </div>
       <div class="row" style="margin-top:8px">
-        <select id="databases"></select>
+        <div class="combobox" id="dbCombobox">
+          <button id="dbComboTrigger" class="combobox-trigger" aria-expanded="false">
+            <span id="dbComboLabel">Select database...</span>
+            <span class="chevron">▾</span>
+          </button>
+          <div id="dbComboDropdown" class="cbx-dropdown" role="listbox" aria-hidden="true">
+            <div class="cbx-search-wrapper">
+              <input id="dbComboSearch" class="cbx-search" placeholder="Search database..." />
+            </div>
+            <div id="dbComboList" class="cbx-list"></div>
+            <div id="dbComboEmpty" class="cbx-empty" style="display:none">No databases found.</div>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:4px">
+        <button id="openDbSettings" style="width:auto; padding:0; background:none; border:none; color:#1976d2; text-decoration:underline">Custom save format</button>
       </div>
       <div style="margin-top:8px">
-        <textarea id="note" placeholder="Optional note (extra context for the AI; it will NOT be added to the Notion page)"></textarea>
+        <textarea id="note" placeholder="Optional extra context for the AI"></textarea>
       </div>
       
       <div class="row" style="margin-top:8px">
         <button id="save">Save to Notion</button>
       </div>
       <div id="status"></div>
-      <div style="margin-top:10px">
-        <small>Tokens not configured? Open <span id="openOptions" class="link">Options</span>.</small>
-      </div>
       <button id="openHistory" title="Recent saves" style="position: fixed; right: 8px; bottom: 8px; background: transparent; border: none; padding: 0; font-size: 18px; line-height: 1; width: auto; height: auto; -webkit-appearance: none; appearance: none;">🕒</button>
     </div>
 
@@ -50,6 +78,55 @@
         <button id="backToMain">← Back</button>
         <button id="clearHistory" style="width:auto">Clear</button>
       </div>
+    </div>
+    <div id="tokensView" style="display:none">
+      <h3 style="margin-top:0">Tokens</h3>
+      <label for="tNotionToken">Notion Integration Token</label>
+      <input id="tNotionToken" type="password" placeholder="secret_..." />
+      <small>
+        Create an <b>Internal Integration</b> and copy its token:
+        <a href="https://www.notion.so/my-integrations" target="_blank" rel="noreferrer">my-integrations</a>.
+        Then share your databases with that integration. Docs:
+        <a href="https://www.notion.com/help/create-integrations-with-the-notion-api" target="_blank" rel="noreferrer">Notion Help</a>.
+      </small>
+      <label for="tOpenAI">OpenAI API Key</label>
+      <input id="tOpenAI" type="password" placeholder="sk-..." />
+      <small>Your API key is stored in the extension's local storage.</small>
+      <label for="tGoogle">Google AI API Key</label>
+      <input id="tGoogle" type="password" placeholder="AIza..." />
+      <small>Create a key in Google AI Studio and paste it here. It will be stored locally.</small>
+      <label for="tModel">Model</label>
+      <select id="tModel"></select>
+      <small>Pick the model to use. Make sure the corresponding API key is configured above.</small>
+      <div class="row" style="margin-top:8px">
+        <button id="tokensBack">← Back</button>
+        <button id="tokensSave" style="width:auto">Save</button>
+      </div>
+      <div id="tokensStatus"></div>
+      <div style="margin-top:10px">
+        <small>Want more settings? Open the <span id="tokensOpenOptions" class="link">full Options</span>.</small>
+      </div>
+    </div>
+    <div id="dbSettingsView" style="display:none">
+      <h3 style="margin-top:0">Database settings</h3>
+      <div id="dbSettingsDbName" style="margin-bottom:8px; color:#555"></div>
+      <label for="dbsPrompt">Custom instructions</label>
+      <textarea id="dbsPrompt" rows="4" style="width:100%" placeholder="Custom instructions for this database (how to map, which properties to prioritize, etc.)"></textarea>
+      <label id="dbsSaveArticleLabel" style="display:flex; align-items:center; gap:6px; margin-top:8px">
+        <input id="dbsSaveArticle" type="checkbox" />
+        <span>Save article content as page content (default on)</span>
+      </label>
+      <label id="dbsCustomizeLabel" style="display:none; align-items:center; gap:6px; margin-top:8px">
+        <input id="dbsCustomize" type="checkbox" />
+        <span>Customize content page</span>
+      </label>
+      <textarea id="dbsContentPrompt" rows="3" style="width:100%; display:none" placeholder="Content customization for article children (e.g., write a concise summary with key points, extract pricing table, etc.)"></textarea>
+      <div class="row" style="margin-top:8px">
+        <button id="dbsBack">← Back</button>
+        <button id="dbsSave" style="width:auto">Save</button>
+        <button id="dbsClear" style="width:auto">Clear</button>
+      </div>
+      <div id="dbsStatus"></div>
     </div>
     <script src="popup.js" type="module"></script>
   </body>
