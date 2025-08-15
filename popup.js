@@ -174,6 +174,41 @@ async function precheck(opts = {}) {
   console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] precheck complete`);
 }
 
+// Open the Tokens configuration view from anywhere
+async function openTokensView() {
+  const tokensView = document.getElementById('tokensView');
+  const tokensStatus = document.getElementById('tokensStatus');
+  const tModel = document.getElementById('tModel');
+  const appView = document.getElementById('app');
+  const notionInput = document.getElementById('tNotionToken');
+  const openaiInput = document.getElementById('tOpenAI');
+  const googleInput = document.getElementById('tGoogle');
+
+  const { notionToken, openaiKey, googleApiKey, llmProvider, llmModel } = await getStorage(['notionToken', 'openaiKey', 'googleApiKey', 'llmProvider', 'llmModel']);
+  if (notionInput) notionInput.value = notionToken || '';
+  if (openaiInput) openaiInput.value = openaiKey || '';
+  if (googleInput) googleInput.value = googleApiKey || '';
+
+  // Populate model selector based on available keys
+  const options = [];
+  if (openaiKey) options.push({ value: 'openai:gpt-5-nano', label: 'OpenAI · GPT-5 Nano' });
+  if (googleApiKey) options.push({ value: 'google:gemini-2.5-flash', label: 'Google · Gemini 2.5 Flash' });
+  if (options.length === 0) options.push({ value: 'openai:gpt-5-nano', label: 'OpenAI · GPT-5 Nano' });
+  if (tModel) {
+    tModel.innerHTML = '';
+    for (const o of options) {
+      const opt = document.createElement('option');
+      opt.value = o.value; opt.textContent = o.label; tModel.appendChild(opt);
+    }
+    const desired = `${llmProvider || 'openai'}:${llmModel || 'gpt-5-nano'}`;
+    const found = Array.from(tModel.options).some((o) => o.value === desired);
+    tModel.value = found ? desired : options[0].value;
+  }
+  if (appView) appView.style.display = 'none';
+  if (tokensStatus) tokensStatus.textContent = '';
+  if (tokensView) tokensView.style.display = 'block';
+}
+
 async function listDatabases(query) {
   const status = document.getElementById('status');
   status.textContent = 'Loading databases...';
@@ -348,28 +383,6 @@ async function main() {
   const dbSettingsDbName = document.getElementById('dbSettingsDbName');
   if (indicator) {
     indicator.addEventListener('click', async () => { await openTokensView(); });
-  }
-  // helper to open tokens view programmatically
-  async function openTokensView() {
-    const { notionToken, openaiKey, googleApiKey, llmProvider, llmModel } = await getStorage(['notionToken', 'openaiKey', 'googleApiKey', 'llmProvider', 'llmModel']);
-    document.getElementById('tNotionToken').value = notionToken || '';
-    document.getElementById('tOpenAI').value = openaiKey || '';
-    document.getElementById('tGoogle').value = googleApiKey || '';
-    const options = [];
-    if (openaiKey) options.push({ value: 'openai:gpt-5-nano', label: 'OpenAI · GPT-5 Nano' });
-    if (googleApiKey) options.push({ value: 'google:gemini-2.5-flash', label: 'Google · Gemini 2.5 Flash' });
-    if (options.length === 0) options.push({ value: 'openai:gpt-5-nano', label: 'OpenAI · GPT-5 Nano' });
-    tModel.innerHTML = '';
-    for (const o of options) {
-      const opt = document.createElement('option');
-      opt.value = o.value; opt.textContent = o.label; tModel.appendChild(opt);
-    }
-    const desired = `${llmProvider || 'openai'}:${llmModel || 'gpt-5-nano'}`;
-    const found = Array.from(tModel.options).some((o) => o.value === desired);
-    tModel.value = found ? desired : options[0].value;
-    appView.style.display = 'none';
-    tokensStatus.textContent = '';
-    tokensView.style.display = 'block';
   }
   if (tokensBack) tokensBack.addEventListener('click', async () => {
     tokensView.style.display = 'none';
