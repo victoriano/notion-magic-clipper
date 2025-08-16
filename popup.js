@@ -531,6 +531,23 @@ async function main() {
     await setStorage({ recentSaves: [] });
     await loadHistory();
   });
+
+  // Enter to save (Intro). Shift+Enter inserts a newline in textarea
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.shiftKey) return;
+    const appViewVisible = (() => {
+      const appViewEl = document.getElementById('app');
+      if (!appViewEl) return false;
+      try { return getComputedStyle(appViewEl).display !== 'none'; } catch { return appViewEl.style.display !== 'none'; }
+    })();
+    if (!appViewVisible) return; // only on main view
+    const target = e.target;
+    // ignore combobox search
+    if (target && target.id === 'dbComboSearch') return;
+    // In textarea (#note) Enter submits; Shift+Enter handled above to insert newline
+    e.preventDefault();
+    save();
+  });
 }
 
 main().catch((e) => {
