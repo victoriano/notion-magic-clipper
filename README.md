@@ -1,7 +1,9 @@
 # Notion Magic Clipper
 
+[Follow on X: @NotionClipper](https://x.com/NotionClipper)
+
 <p align="center">
-  <img src="notion_magic_clipper_logo.png" alt="Notion Magic Clipper logo" width="220" />
+  <img src="icons/Clip Logo Chrome Blue.png" alt="Notion Magic Clipper logo" width="220" />
   <br/>
   <em>Clip the web to Notion with a bit of magic ✨</em>
 </p>
