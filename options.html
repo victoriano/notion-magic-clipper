@@ -5,82 +5,107 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Extension Options</title>
     <style>
-      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif; margin: 24px; max-width: 800px; }
+      :root {
+        --background: #ffffff;
+        --foreground: #0a0a0a;
+        --muted: #f5f5f5;
+        --muted-foreground: #6b7280;
+        --card: #ffffff;
+        --card-foreground: #0a0a0a;
+        --border: #e5e7eb;
+        --input: #e5e7eb;
+        --ring: #2563eb;
+        --primary: #2563eb;
+        --primary-foreground: #ffffff;
+        --secondary: #f3f4f6;
+        --secondary-foreground: #0a0a0a;
+        --radius: 12px;
+        color-scheme: light;
+      }
+      * { box-sizing: border-box; }
+      body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif; margin: 24px; max-width: 800px; background: var(--background); color: var(--foreground); }
+      .container { background: var(--card); color: var(--card-foreground); border: none; border-radius: 0; box-shadow: none; padding: 0; }
+      h2, h3 { margin-top: 0; letter-spacing: 0.01em; }
       label { display: block; margin-top: 16px; font-weight: 600; }
-      input, select { width: 100%; padding: 8px; font-size: 14px; }
-      small { color: #666; }
-      button { margin-top: 16px; padding: 8px 12px; font-size: 14px; cursor: pointer; }
+      input, select { width: 100%; padding: 10px; font-size: 14px; background: var(--card); color: var(--foreground); border: 1px solid var(--input); border-radius: 10px; }
+      input:focus, select:focus { outline: 2px solid var(--ring); outline-offset: 2px; }
+      small { color: var(--muted-foreground); }
       .row { display: flex; gap: 12px; }
       .col { flex: 1; }
-      .success { color: #0b7a0b; }
-      .error { color: #b00020; }
-      code { background: #f3f3f3; padding: 2px 4px; border-radius: 4px; }
-      a { color: #1976d2; }
+      a { color: var(--primary); }
+      .success { color: #16a34a; }
+      .error { color: #ef4444; }
+      code { background: var(--muted); padding: 2px 4px; border-radius: 6px; }
+      .btn { margin-top: 16px; padding: 10px 12px; font-size: 14px; cursor: pointer; border-radius: 10px; border: 1px solid var(--border); background: var(--secondary); color: var(--secondary-foreground); }
+      .btn-primary { background: var(--primary); color: var(--primary-foreground); border-color: var(--primary); }
+      .btn-outline { background: transparent; color: var(--foreground); }
     </style>
   </head>
   <body>
-    <h2>Options</h2>
-    <p>Configure your connection with Notion and LLM providers (OpenAI, Google Gemini).</p>
+    <div class="container">
+      <h2>Options</h2>
+      <p>Configure your connection with Notion and LLM providers (OpenAI, Google Gemini).</p>
 
-    <label for="notionToken">Notion Integration Token</label>
-    <input id="notionToken" type="password" placeholder="secret_..." />
-    <small>
-      Create an <b>Internal Integration</b> and copy its token: 
-      <a href="https://www.notion.so/my-integrations" target="_blank" rel="noreferrer">my-integrations</a>.
-      Then share your databases with that integration.
-      Docs: <a href="https://www.notion.com/help/create-integrations-with-the-notion-api" target="_blank" rel="noreferrer">Notion Help</a>.
-    </small>
+      <label for="notionToken">Notion Integration Token</label>
+      <input id="notionToken" type="password" placeholder="secret_..." />
+      <small>
+        Create an <b>Internal Integration</b> and copy its token: 
+        <a href="https://www.notion.so/my-integrations" target="_blank" rel="noreferrer">my-integrations</a>.
+        Then share your databases with that integration.
+        Docs: <a href="https://www.notion.com/help/create-integrations-with-the-notion-api" target="_blank" rel="noreferrer">Notion Help</a>.
+      </small>
 
-    <label for="openaiKey">OpenAI API Key</label>
-    <input id="openaiKey" type="password" placeholder="sk-..." />
-    <small>Your API key is stored in the extension's local storage.</small>
+      <label for="openaiKey">OpenAI API Key</label>
+      <input id="openaiKey" type="password" placeholder="sk-..." />
+      <small>Your API key is stored in the extension's local storage.</small>
 
-    <label for="googleApiKey">Google AI API Key (Gemini)</label>
-    <input id="googleApiKey" type="password" placeholder="AIza..." />
-    <small>Create a key in Google AI Studio and paste it here. It will be stored locally.</small>
+      <label for="googleApiKey">Google AI API Key (Gemini)</label>
+      <input id="googleApiKey" type="password" placeholder="AIza..." />
+      <small>Create a key in Google AI Studio and paste it here. It will be stored locally.</small>
 
-    <label for="model">Model</label>
-    <select id="model"></select>
-    <small>Pick the model to use. Make sure the corresponding API key is configured above.</small>
+      <label for="model">Model</label>
+      <select id="model"></select>
+      <small>Pick the model to use. Make sure the corresponding API key is configured above.</small>
 
-    <div class="row">
-      <div class="col" id="reasoningCol">
-        <label for="reasoning">Reasoning effort (GPT-5)</label>
-        <select id="reasoning">
-          <option value="minimal">minimal</option>
-          <option value="low" selected>low</option>
-          <option value="medium">medium</option>
-          <option value="high">high</option>
-        </select>
-      </div>
-      <div class="col" id="verbosityCol">
-        <label for="verbosity">Verbosity (GPT-5)</label>
-        <select id="verbosity">
-          <option value="low" selected>low</option>
-          <option value="medium">medium</option>
-          <option value="high">high</option>
-        </select>
-      </div>
-    </div>
-
-    <button id="saveBtn">Save options</button>
-    <div id="status"></div>
-
-    <hr style="margin:24px 0"/>
-    <h3>Utilities</h3>
-    <div>
-      <p>List <b>untitled</b> databases to review them in Notion.</p>
-      <button id="listUntitledBtn">List untitled databases</button>
-      <div id="untitledStatus" style="margin-top:8px"></div>
-      <ul id="untitledList"></ul>
-      <hr style="margin:16px 0" />
-      <p>List <b>all</b> databases accessible with your token.</p>
       <div class="row">
-        <input id="allDbQuery" placeholder="Filter by text (optional)" />
-        <button id="listAllBtn">List all</button>
+        <div class="col" id="reasoningCol">
+          <label for="reasoning">Reasoning effort (GPT-5)</label>
+          <select id="reasoning">
+            <option value="minimal">minimal</option>
+            <option value="low" selected>low</option>
+            <option value="medium">medium</option>
+            <option value="high">high</option>
+          </select>
+        </div>
+        <div class="col" id="verbosityCol">
+          <label for="verbosity">Verbosity (GPT-5)</label>
+          <select id="verbosity">
+            <option value="low" selected>low</option>
+            <option value="medium">medium</option>
+            <option value="high">high</option>
+          </select>
+        </div>
       </div>
-      <div id="allStatus" style="margin-top:8px"></div>
-      <ul id="allList"></ul>
+
+      <button id="saveBtn" class="btn btn-primary">Save options</button>
+      <div id="status"></div>
+
+      <hr style="margin:24px 0;border-color: var(--border)"/>
+      <h3>Utilities</h3>
+      <div>
+        <p>List <b>untitled</b> databases to review them in Notion.</p>
+        <button id="listUntitledBtn" class="btn">List untitled databases</button>
+        <div id="untitledStatus" style="margin-top:8px"></div>
+        <ul id="untitledList"></ul>
+        <hr style="margin:16px 0;border-color: var(--border)" />
+        <p>List <b>all</b> databases accessible with your token.</p>
+        <div class="row">
+          <input id="allDbQuery" placeholder="Filter by text (optional)" />
+          <button id="listAllBtn" class="btn">List all</button>
+        </div>
+        <div id="allStatus" style="margin-top:8px"></div>
+        <ul id="allList"></ul>
+      </div>
     </div>
 
     <script type="module" src="options.js"></script>
