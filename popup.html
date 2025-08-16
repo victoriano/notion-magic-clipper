@@ -48,6 +48,7 @@
       .btn-outline { background: transparent; color: var(--foreground); }
       .btn-ghost { background: transparent; border-color: transparent; color: var(--primary); padding: 0; }
       .icon-button { background: transparent; border: none; color: var(--foreground); }
+      .icon-button svg { width: 18px; height: 18px; stroke: currentColor; }
       /* Notion-like primary button and hint */
       .btn-primary { background: var(--primary); border-color: var(--primary); }
       .btn-primary:hover { filter: none; background: #56BCFB; border-color: #56BCFB; }
@@ -121,9 +122,15 @@
         <div class="row" style="margin-top:8px">
           <button id="save" class="btn btn-primary">Save to Notion</button>
           <span class="kbd-hint">Intro</span>
+          <button id="openHistory" class="icon-button" title="Recent saves" aria-label="Recent saves" style="margin-left:auto; border: none; padding: 0; line-height: 1; width: auto; height: auto; -webkit-appearance: none; appearance: none;">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 3v5h5"/>
+              <path d="M3.05 13A9 9 0 1 0 8 3"/>
+              <path d="M12 7v5l4 2"/>
+            </svg>
+          </button>
         </div>
         <div id="status"></div>
-        <button id="openHistory" class="icon-button" title="Recent saves" style="position: fixed; right: 8px; bottom: 8px; border: none; padding: 0; font-size: 18px; line-height: 1; width: auto; height: auto; -webkit-appearance: none; appearance: none;">🕒</button>
       </div>
 
       <div id="historyView" style="display:none">
