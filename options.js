@@ -43,16 +43,152 @@ async function populateModelSelector({ openaiKey, googleApiKey, llmProvider, llm
   });
 }
 
+// ---- Notion OAuth helpers ----
+function buildNotionOAuthUrl(clientId, redirectUri, state) {
+  const params = new URLSearchParams({
+    client_id: clientId,
+    response_type: 'code',
+    owner: 'user',
+    redirect_uri: redirectUri,
+    state
+  });
+  return `https://api.notion.com/v1/oauth/authorize?${params.toString()}`;
+}
+
+async function exchangeNotionCodeForToken({ clientId, clientSecret, code, redirectUri }) {
+  const body = new URLSearchParams({
+    grant_type: 'authorization_code',
+    code,
+    redirect_uri: redirectUri
+  });
+  const basic = btoa(`${clientId}:${clientSecret}`);
+  const resp = await fetch('https://api.notion.com/v1/oauth/token', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Basic ${basic}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Notion-Version': '2022-06-28'
+    },
+    body
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    throw new Error(`Notion OAuth token exchange failed: ${text}`);
+  }
+  return resp.json();
+}
+
+function getExtensionRedirectUrl() {
+  // Using chrome.identity redirect URL for extensions
+  try {
+    return chrome.identity.getRedirectURL('notion_oauth');
+  } catch {
+    // Fallback for environments without identity
+    const id = chrome.runtime.id || 'ext';
+    return `https://${id}.chromiumapp.org/notion_oauth`;
+  }
+}
+
+async function renderOauthList() {
+  const listEl = document.getElementById('notionOauthList');
+  const status = document.getElementById('oauthStatus');
+  const { notionOAuthConnections } = await get(['notionOAuthConnections']);
+  const conns = Array.isArray(notionOAuthConnections) ? notionOAuthConnections : [];
+  listEl.innerHTML = '';
+  if (!conns.length) {
+    status.textContent = 'No connected workspaces yet.';
+    return;
+  }
+  status.textContent = '';
+  for (let i = 0; i < conns.length; i++) {
+    const c = conns[i];
+    const li = document.createElement('li');
+    const name = c.workspace_name || c.workspaceName || 'Workspace';
+    const id = c.workspace_id || c.workspaceId || '';
+    const span = document.createElement('span');
+    span.textContent = `${name}${id ? ` (${id})` : ''}`;
+    const btn = document.createElement('button');
+    btn.textContent = 'Disconnect';
+    btn.style.marginLeft = '8px';
+    btn.addEventListener('click', async () => {
+      const next = conns.slice(0, i).concat(conns.slice(i + 1));
+      await set({ notionOAuthConnections: next });
+      await renderOauthList();
+    });
+    li.appendChild(span);
+    li.appendChild(btn);
+    listEl.appendChild(li);
+  }
+}
+
+async function connectNotionOAuth() {
+  const status = document.getElementById('oauthStatus');
+  status.textContent = '';
+  const clientId = (document.getElementById('notionOAuthClientId')?.value || '').trim();
+  const clientSecret = (document.getElementById('notionOAuthClientSecret')?.value || '').trim();
+  if (!clientId || !clientSecret) {
+    status.textContent = 'Client ID and Secret are required.';
+    return;
+  }
+  const redirectUri = getExtensionRedirectUrl();
+  const state = Math.random().toString(36).slice(2);
+  const authUrl = buildNotionOAuthUrl(clientId, redirectUri, state);
+  try {
+    const responseUrl = await new Promise((resolve, reject) => {
+      chrome.identity.launchWebAuthFlow({ url: authUrl, interactive: true }, (redirectedTo) => {
+        if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+        resolve(redirectedTo);
+      });
+    });
+    const u = new URL(responseUrl);
+    const returnedState = u.searchParams.get('state');
+    const code = u.searchParams.get('code');
+    const error = u.searchParams.get('error');
+    if (error) throw new Error(error);
+    if (!code) throw new Error('No authorization code returned');
+    if (returnedState !== state) throw new Error('State mismatch');
+    const token = await exchangeNotionCodeForToken({ clientId, clientSecret, code, redirectUri });
+    const entry = {
+      access_token: token.access_token,
+      workspace_id: token.workspace_id || token.workspace?.id,
+      workspace_name: token.workspace_name || token.workspace?.name,
+      workspace_icon: token.workspace_icon || token.workspace?.icon,
+      bot_id: token.bot_id,
+      owner: token.owner
+    };
+    const { notionOAuthConnections } = await get(['notionOAuthConnections']);
+    const list = Array.isArray(notionOAuthConnections) ? notionOAuthConnections : [];
+    // De-duplicate by workspace_id
+    const exists = list.findIndex((x) => (x.workspace_id || x.workspaceId) === entry.workspace_id);
+    if (exists >= 0) list.splice(exists, 1, entry);
+    else list.push(entry);
+    await set({ notionOAuthConnections: list, notionOAuthClientId: clientId, notionOAuthClientSecret: clientSecret });
+    status.textContent = 'Connected ✓';
+    status.classList.add('success');
+    await renderOauthList();
+  } catch (e) {
+    status.textContent = String(e?.message || e);
+    status.classList.remove('success');
+  }
+}
+
 async function load() {
-  const { notionToken, openaiKey, googleApiKey, openai_reasoning_effort, openai_verbosity, llmProvider, llmModel } = await get([
-    'notionToken', 'openaiKey', 'googleApiKey', 'openai_reasoning_effort', 'openai_verbosity', 'llmProvider', 'llmModel'
+  const { notionToken, openaiKey, googleApiKey, openai_reasoning_effort, openai_verbosity, llmProvider, llmModel, notionOAuthClientId, notionOAuthClientSecret } = await get([
+    'notionToken', 'openaiKey', 'googleApiKey', 'openai_reasoning_effort', 'openai_verbosity', 'llmProvider', 'llmModel', 'notionOAuthClientId', 'notionOAuthClientSecret'
   ]);
   if (notionToken) document.getElementById('notionToken').value = notionToken;
   if (openaiKey) document.getElementById('openaiKey').value = openaiKey;
   if (googleApiKey) document.getElementById('googleApiKey').value = googleApiKey;
   if (openai_reasoning_effort) document.getElementById('reasoning').value = openai_reasoning_effort;
   if (openai_verbosity) document.getElementById('verbosity').value = openai_verbosity;
+  if (notionOAuthClientId) document.getElementById('notionOAuthClientId').value = notionOAuthClientId;
+  if (notionOAuthClientSecret) document.getElementById('notionOAuthClientSecret').value = notionOAuthClientSecret;
+  const redirectEl = document.getElementById('oauthRedirectInfo');
+  if (redirectEl) redirectEl.textContent = `OAuth redirect URL: ${getExtensionRedirectUrl()}`;
   await populateModelSelector({ openaiKey, googleApiKey, llmProvider, llmModel });
+  await renderOauthList();
+  const connectBtn = document.getElementById('connectNotionOauth');
+  if (connectBtn) connectBtn.addEventListener('click', connectNotionOAuth);
 }
 
 async function save() {
@@ -65,8 +201,10 @@ async function save() {
   const openai_verbosity = document.getElementById('verbosity').value;
   const modelSel = document.getElementById('model');
   const { provider: llmProvider, model: llmModel } = parseModelValue(modelSel ? modelSel.value : 'openai:gpt-5-nano');
+  const notionOAuthClientId = (document.getElementById('notionOAuthClientId')?.value || '').trim();
+  const notionOAuthClientSecret = (document.getElementById('notionOAuthClientSecret')?.value || '').trim();
 
-  await set({ notionToken, openaiKey, googleApiKey, openai_reasoning_effort, openai_verbosity, llmProvider, llmModel });
+  await set({ notionToken, openaiKey, googleApiKey, openai_reasoning_effort, openai_verbosity, llmProvider, llmModel, notionOAuthClientId, notionOAuthClientSecret });
   status.innerHTML = '<span class="success">Saved ✓</span>';
 }
 
@@ -134,10 +272,12 @@ const NOTION_API_BASE = 'https://api.notion.com/v1';
 const NOTION_VERSION = '2022-06-28';
 
 async function notionFetchFromOptions(path, options = {}) {
-  const { notionToken } = await get(['notionToken']);
-  if (!notionToken) throw new Error('Missing Notion token. Configure it and save changes.');
+  const { notionToken, notionOAuthConnections } = await get(['notionToken', 'notionOAuthConnections']);
+  const oauthConns = Array.isArray(notionOAuthConnections) ? notionOAuthConnections : [];
+  const token = notionToken || oauthConns[0]?.access_token; // best-effort fallback for direct calls from Options
+  if (!token) throw new Error('Missing Notion token. Configure Integration token or connect via OAuth.');
   const headers = {
-    Authorization: `Bearer ${notionToken}`,
+    Authorization: `Bearer ${token}`,
     'Notion-Version': NOTION_VERSION,
     'Content-Type': 'application/json',
     ...(options.headers || {})
@@ -234,7 +374,8 @@ function renderAllDatabasesList(container, items, settings) {
     const a = document.createElement('a');
     a.href = db.url;
     const emoji = db.iconEmoji || '';
-    a.textContent = `${emoji ? emoji + ' ' : ''}${db.title}`;
+    const workspace = db.workspaceName ? ` / ${db.workspaceName}` : '';
+    a.textContent = `${emoji ? emoji + ' ' : ''}${db.title}${workspace}`;
     a.target = '_blank';
     a.rel = 'noopener noreferrer';
     const current = (settings && settings[db.id]) || { prompt: '', saveArticle: true, customizeContent: false, contentPrompt: '' };
@@ -334,8 +475,8 @@ function renderAllDatabasesList(container, items, settings) {
       await setDatabaseSettings(map);
       mini.textContent = 'Saved ✓';
       mini.style.color = '#0b7a0b';
-      badge.textContent = text ? ' · prompt saved' : '';
-      badge.style.color = text ? '#0b7a0b' : '#666';
+      const hasPrompt = !!text;
+      // Update badge color/text (badge not available here, so we won't update it)
     });
     clearBtn.addEventListener('click', async () => {
       ta.value = '';
@@ -345,7 +486,6 @@ function renderAllDatabasesList(container, items, settings) {
       await setDatabaseSettings(map);
       mini.textContent = 'Cleared';
       mini.style.color = '#666';
-      badge.textContent = '';
       customizeChk.checked = false;
       contentTa.value = '';
       contentTa.style.display = 'none';

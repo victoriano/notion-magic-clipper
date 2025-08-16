@@ -67,7 +67,8 @@ function renderDbList(items) {
     row.dataset.id = db.id;
     const emoji = db.iconEmoji || '';
     const left = document.createElement('span');
-    left.textContent = (emoji ? `${emoji} ` : '') + db.title;
+    const workspace = db.workspaceName ? ` / ${db.workspaceName}` : '';
+    left.textContent = (emoji ? `${emoji} ` : '') + db.title + workspace;
     const check = document.createElement('span');
     check.textContent = '✓';
     check.className = 'cbx-check';
@@ -86,7 +87,8 @@ function setSelectedDb(id) {
   dbSelectedId = id || '';
   const { label, list } = getDbElements();
   const found = dbList.find((d) => d.id === dbSelectedId);
-  label.textContent = found ? `${found.iconEmoji ? found.iconEmoji + ' ' : ''}${found.title}` : 'Select database...';
+  const ws = found?.workspaceName ? ` / ${found.workspaceName}` : '';
+  label.textContent = found ? `${found.iconEmoji ? found.iconEmoji + ' ' : ''}${found.title}${ws}` : 'Select database...';
   // update selection check
   Array.from(list.querySelectorAll('.cbx-item')).forEach((el) => {
     if (el.dataset.id === dbSelectedId) el.setAttribute('aria-selected', 'true');
@@ -103,7 +105,7 @@ function filterDbList(term) {
     dbFiltered = dbList.slice();
   } else {
     dbFiltered = dbList.filter((d) => {
-      const s = `${d.title} ${d.iconEmoji || ''}`.toLowerCase();
+      const s = `${d.title} ${d.iconEmoji || ''} ${d.workspaceName || ''}`.toLowerCase();
       return s.includes(t);
     });
   }
@@ -153,10 +155,12 @@ async function precheck(opts = {}) {
   const pre = document.getElementById('precheck');
   const app = document.getElementById('app');
   const indicator = document.getElementById('statusIndicator');
-  const cfg = await getStorage(['notionToken', 'openaiKey', 'googleApiKey', 'llmProvider', 'llmModel']);
+  const cfg = await getStorage(['notionToken', 'notionOAuthConnections', 'openaiKey', 'googleApiKey', 'llmProvider', 'llmModel']);
   const provider = cfg.llmProvider || 'openai';
   const model = cfg.llmModel || 'gpt-5-nano';
-  const hasNotion = !!cfg.notionToken;
+  const hasIntegration = !!cfg.notionToken;
+  const hasOauth = Array.isArray(cfg.notionOAuthConnections) && cfg.notionOAuthConnections.length > 0;
+  const hasNotion = hasIntegration || hasOauth;
   const hasOpenAI = !!cfg.openaiKey;
   const hasGoogle = !!cfg.googleApiKey;
   let hasLLM = false;
@@ -454,10 +458,11 @@ async function main() {
     dbsStatus.textContent = '';
     const currentDb = dbList.find((d) => d.id === dbSelectedId);
     // clickable link to Notion database
+    const ws = currentDb?.workspaceName ? ` / ${currentDb.workspaceName}` : '';
     if (currentDb && currentDb.url) {
-      dbSettingsDbName.innerHTML = `<a href="${currentDb.url}" target="_blank" rel="noopener noreferrer">${currentDb.iconEmoji ? currentDb.iconEmoji + ' ' : ''}${currentDb.title} ↗</a>`;
+      dbSettingsDbName.innerHTML = `<a href="${currentDb.url}" target="_blank" rel="noopener noreferrer">${currentDb.iconEmoji ? currentDb.iconEmoji + ' ' : ''}${currentDb.title}${ws} ↗</a>`;
     } else {
-      dbSettingsDbName.textContent = currentDb ? `${currentDb.iconEmoji ? currentDb.iconEmoji + ' ' : ''}${currentDb.title}` : '';
+      dbSettingsDbName.textContent = currentDb ? `${currentDb.iconEmoji ? currentDb.iconEmoji + ' ' : ''}${currentDb.title}${ws}` : '';
     }
     const { databaseSettings } = await getStorage(['databaseSettings']);
     const settingsForDb = (databaseSettings || {})[dbSelectedId] || {};
@@ -518,7 +523,8 @@ async function main() {
       const li = document.createElement('li');
       const notionLink = document.createElement('a');
       notionLink.href = it.url || '#';
-      notionLink.textContent = (it.title ? it.title + ' – ' : '') + (it.databaseTitle ? it.databaseTitle : 'Notion');
+      const ws = it.databaseWorkspace ? ` / ${it.databaseWorkspace}` : '';
+      notionLink.textContent = (it.title ? it.title + ' – ' : '') + (it.databaseTitle ? it.databaseTitle : 'Notion') + ws;
       notionLink.target = '_blank';
       notionLink.rel = 'noopener noreferrer';
 
