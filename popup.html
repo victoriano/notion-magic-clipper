@@ -31,6 +31,7 @@
       a { color: var(--primary); }
       .card { background: var(--card); color: var(--card-foreground); border: none; border-radius: 0; box-shadow: none; padding: 12px; }
       .title { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; letter-spacing: 0.01em; }
+      .app-title { margin: 0; display: flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 700; letter-spacing: 0.01em; }
       /* Inputs */
       select, input, textarea { width: 100%; padding: 8px 10px; font-size: 14px; color: var(--foreground); background: var(--card); border: 1px solid var(--input); border-radius: 10px; }
       textarea { min-height: 64px; }
@@ -87,9 +88,9 @@
   </head>
   <body>
     <div class="card">
-      <div class="row" style="justify-content: space-between; align-items: center; margin-bottom: 8px">
-        <h3 class="title">
-          <img src="icons/Clip Logo Chrome White.svg" alt="" style="height:18px; width:18px"/>
+      <div class="row" style="justify-content: space-between; align-items: center; margin-bottom: 14px">
+        <h3 class="app-title">
+          <img src="icons/Clip Logo Chrome White.svg" alt="" style="height:22px; width:22px"/>
           Notion Magic Clipper
         </h3>
         <button id="statusIndicator" class="indicator" title="Checking tokens…" aria-label="Token status"></button>
@@ -164,7 +165,7 @@
       </div>
       <div id="dbSettingsView" style="display:none">
         <h3 class="title">Database settings</h3>
-        <div id="dbSettingsDbName" style="margin-bottom:8px; color: var(--muted-foreground)"></div>
+        <div id="dbSettingsDbName" style="margin-bottom:10px; color: var(--foreground); font-size: 16px; font-weight: 700"></div>
         <label for="dbsPrompt" class="section-title">Custom instructions</label>
         <textarea id="dbsPrompt" rows="4" style="width:100%" placeholder="Custom instructions for this database (how to map, which properties to prioritize, etc.)"></textarea>
         <label id="dbsSaveArticleLabel">
