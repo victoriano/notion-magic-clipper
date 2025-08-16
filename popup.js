@@ -458,6 +458,7 @@ async function main() {
     };
     await setStorage({ databaseSettings: map });
     dbsStatus.textContent = 'Saved ✓';
+    dbsStatus.classList.add('success');
   });
   if (dbsClear) dbsClear.addEventListener('click', async () => {
     const { databaseSettings } = await getStorage(['databaseSettings']);
@@ -470,6 +471,7 @@ async function main() {
     dbsContentPrompt.value = '';
     updateCustomizeVisibility();
     dbsStatus.textContent = 'Cleared';
+    dbsStatus.classList.remove('success');
   });
 
   // History view navigation
