@@ -214,7 +214,13 @@ try { window.openTokensView = openTokensView; } catch {}
 
 async function listDatabases(query) {
   const status = document.getElementById('status');
-  status.textContent = 'Loading databases...';
+  if (status) status.textContent = '';
+  // Show loading state inside the combobox label and disable trigger
+  try {
+    const { label, trigger } = getDbElements();
+    if (label) label.textContent = 'Loading databases...';
+    if (trigger) { trigger.disabled = true; trigger.setAttribute('aria-busy', 'true'); }
+  } catch {}
   const res = await chrome.runtime.sendMessage({ type: 'LIST_DATABASES', query });
   if (!res?.ok) {
     const err = res?.error || '';
@@ -233,9 +239,20 @@ async function listDatabases(query) {
     } else {
       status.textContent = err || 'Error listing databases';
     }
+    // Re-enable combobox trigger and restore label
+    try {
+      const { label, trigger } = getDbElements();
+      if (label) label.textContent = 'Select database...';
+      if (trigger) { trigger.disabled = false; trigger.removeAttribute('aria-busy'); }
+    } catch {}
     return [];
   }
-  status.textContent = '';
+  if (status) status.textContent = '';
+  // Clear loading state
+  try {
+    const { trigger } = getDbElements();
+    if (trigger) { trigger.disabled = false; trigger.removeAttribute('aria-busy'); }
+  } catch {}
   return res.databases;
 }
 
@@ -275,6 +292,10 @@ async function loadDatabases() {
   // Preselect last used or first
   const pre = stored.lastDatabaseId && dbList.find((d) => d.id === stored.lastDatabaseId) ? stored.lastDatabaseId : (dbList[0]?.id || '');
   setSelectedDb(pre);
+  // Restore label if nothing selected
+  if (!pre) {
+    try { const { label } = getDbElements(); if (label) label.textContent = 'Select database...'; } catch {}
+  }
   console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Databases loaded:`, dbList.length);
 }
 
