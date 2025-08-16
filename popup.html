@@ -88,6 +88,9 @@
       #dbsStatus.success { color: #16a34a; }
       /* Tokens page status */
       #tokensStatus { margin-top: 12px; color: var(--muted-foreground); }
+      /* Tokens view spacing & separators */
+      #tokensView small { display: block; margin-top: 6px; margin-bottom: 8px; }
+      .divider { height: 1px; background: var(--border); border: 0; margin: 14px 0; }
     </style>
   </head>
   <body>
@@ -160,12 +163,15 @@
           Then share your databases with that integration. Docs:
           <a href="https://www.notion.com/help/create-integrations-with-the-notion-api" target="_blank" rel="noreferrer">Notion Help</a>.
         </small>
+        <hr class="divider" />
         <label for="tOpenAI">OpenAI API Key</label>
         <input id="tOpenAI" type="password" placeholder="sk-..." />
         <small>Your API key is stored in the extension's local storage.</small>
+        <hr class="divider" />
         <label for="tGoogle">Google AI API Key</label>
         <input id="tGoogle" type="password" placeholder="AIza..." />
         <small>Create a key in Google AI Studio and paste it here. It will be stored locally.</small>
+        <hr class="divider" />
         <label for="tModel">Model</label>
         <select id="tModel"></select>
         <small>Pick the model to use. Make sure the corresponding API key is configured above.</small>
@@ -174,7 +180,7 @@
           <button id="tokensSave" class="btn btn-primary" style="width:auto">Save</button>
         </div>
         <div id="tokensStatus"></div>
-        <div style="margin-top:10px">
+        <div style="margin-top:12px">
           <small>Want more settings? Open the <span id="tokensOpenOptions" class="link">full Options</span>.</small>
         </div>
       </div>
