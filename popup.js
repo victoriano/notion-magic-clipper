@@ -209,6 +209,9 @@ async function openTokensView() {
   if (tokensView) tokensView.style.display = 'block';
 }
 
+// Expose for fallback handlers (module scope isn't global in type="module")
+try { window.openTokensView = openTokensView; } catch {}
+
 async function listDatabases(query) {
   const status = document.getElementById('status');
   status.textContent = 'Loading databases...';
@@ -218,7 +221,15 @@ async function listDatabases(query) {
     if (/Missing Notion token/i.test(err)) {
       status.innerHTML = 'Missing Notion token. <a href="#" id="openTokensFromStatus">Configure it</a>.';
       const link = document.getElementById('openTokensFromStatus');
-      if (link) link.addEventListener('click', (e) => { e.preventDefault(); openTokensView(); });
+      if (link) link.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (typeof window !== 'undefined' && typeof window.openTokensView === 'function') {
+          window.openTokensView();
+        } else {
+          const ind = document.getElementById('statusIndicator');
+          if (ind) ind.click();
+        }
+      });
     } else {
       status.textContent = err || 'Error listing databases';
     }
