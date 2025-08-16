@@ -214,7 +214,13 @@ try { window.openTokensView = openTokensView; } catch {}
 
 async function listDatabases(query) {
   const status = document.getElementById('status');
-  status.textContent = 'Loading databases...';
+  if (status) status.textContent = '';
+  // Show loading state inside the combobox label and disable trigger
+  try {
+    const { label, trigger } = getDbElements();
+    if (label) label.textContent = 'Loading databases...';
+    if (trigger) { trigger.disabled = true; trigger.setAttribute('aria-busy', 'true'); }
+  } catch {}
   const res = await chrome.runtime.sendMessage({ type: 'LIST_DATABASES', query });
   if (!res?.ok) {
     const err = res?.error || '';
@@ -233,9 +239,20 @@ async function listDatabases(query) {
     } else {
       status.textContent = err || 'Error listing databases';
     }
+    // Re-enable combobox trigger and restore label
+    try {
+      const { label, trigger } = getDbElements();
+      if (label) label.textContent = 'Select database...';
+      if (trigger) { trigger.disabled = false; trigger.removeAttribute('aria-busy'); }
+    } catch {}
     return [];
   }
-  status.textContent = '';
+  if (status) status.textContent = '';
+  // Clear loading state
+  try {
+    const { trigger } = getDbElements();
+    if (trigger) { trigger.disabled = false; trigger.removeAttribute('aria-busy'); }
+  } catch {}
   return res.databases;
 }
 
@@ -275,6 +292,10 @@ async function loadDatabases() {
   // Preselect last used or first
   const pre = stored.lastDatabaseId && dbList.find((d) => d.id === stored.lastDatabaseId) ? stored.lastDatabaseId : (dbList[0]?.id || '');
   setSelectedDb(pre);
+  // Restore label if nothing selected
+  if (!pre) {
+    try { const { label } = getDbElements(); if (label) label.textContent = 'Select database...'; } catch {}
+  }
   console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Databases loaded:`, dbList.length);
 }
 
@@ -406,6 +427,7 @@ async function main() {
   if (tokensOpenOptions) tokensOpenOptions.addEventListener('click', () => chrome.runtime.openOptionsPage());
   if (tokensSave) tokensSave.addEventListener('click', async () => {
     tokensStatus.textContent = '';
+    tokensStatus.classList.remove('success');
     const notionToken = document.getElementById('tNotionToken').value.trim();
     const openaiKey = document.getElementById('tOpenAI').value.trim();
     const googleApiKey = document.getElementById('tGoogle').value.trim();
@@ -414,6 +436,7 @@ async function main() {
     const llmModel = rest.join(':') || 'gpt-5-nano';
     await setStorage({ notionToken, openaiKey, googleApiKey, llmProvider, llmModel });
     tokensStatus.textContent = 'Saved ✓';
+    tokensStatus.classList.add('success');
     await precheck({ preserveViews: true });
     needsReloadDatabases = true;
   });
@@ -458,6 +481,7 @@ async function main() {
     };
     await setStorage({ databaseSettings: map });
     dbsStatus.textContent = 'Saved ✓';
+    dbsStatus.classList.add('success');
   });
   if (dbsClear) dbsClear.addEventListener('click', async () => {
     const { databaseSettings } = await getStorage(['databaseSettings']);
@@ -470,6 +494,7 @@ async function main() {
     dbsContentPrompt.value = '';
     updateCustomizeVisibility();
     dbsStatus.textContent = 'Cleared';
+    dbsStatus.classList.remove('success');
   });
 
   // History view navigation
@@ -530,6 +555,23 @@ async function main() {
   clearBtn.addEventListener('click', async () => {
     await setStorage({ recentSaves: [] });
     await loadHistory();
+  });
+
+  // Enter to save (Intro). Shift+Enter inserts a newline in textarea
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.shiftKey) return;
+    const appViewVisible = (() => {
+      const appViewEl = document.getElementById('app');
+      if (!appViewEl) return false;
+      try { return getComputedStyle(appViewEl).display !== 'none'; } catch { return appViewEl.style.display !== 'none'; }
+    })();
+    if (!appViewVisible) return; // only on main view
+    const target = e.target;
+    // ignore combobox search
+    if (target && target.id === 'dbComboSearch') return;
+    // In textarea (#note) Enter submits; Shift+Enter handled above to insert newline
+    e.preventDefault();
+    save();
   });
 }
 
