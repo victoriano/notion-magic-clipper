@@ -444,6 +444,9 @@ async function main() {
     await precheck({ preserveViews: true });
     needsReloadDatabases = true;
   });
+  // Tokens view: backend login shortcut
+  const tokensConnectBackend = document.getElementById('tokensConnectBackend');
+  if (tokensConnectBackend) tokensConnectBackend.addEventListener('click', () => chrome.runtime.openOptionsPage());
 
   // Database settings mini-page
   function updateCustomizeVisibility() {

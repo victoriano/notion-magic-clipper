@@ -69,6 +69,17 @@
       <div id="oauthStatus" style="margin-top:8px"></div>
       <ul id="notionOauthList"></ul>
 
+      <label for="backendBaseUrl">Backend Base URL</label>
+      <input id="backendBaseUrl" placeholder="https://your-backend.example.com" />
+      <small>Use your backend's OAuth flow. The extension will receive connected workspaces from your server after login.</small>
+      <div class="row">
+        <div class="col">
+          <button id="connectNotionViaBackend" class="btn">Login with Notion (via backend)</button>
+        </div>
+      </div>
+      <small id="backendRedirectInfo"></small>
+      <div id="backendStatus" style="margin-top:8px"></div>
+
       <label for="openaiKey">OpenAI API Key</label>
       <input id="openaiKey" type="password" placeholder="sk-..." />
       <small>Your API key is stored in the extension's local storage.</small>
