@@ -427,6 +427,7 @@ async function main() {
   if (tokensOpenOptions) tokensOpenOptions.addEventListener('click', () => chrome.runtime.openOptionsPage());
   if (tokensSave) tokensSave.addEventListener('click', async () => {
     tokensStatus.textContent = '';
+    tokensStatus.classList.remove('success');
     const notionToken = document.getElementById('tNotionToken').value.trim();
     const openaiKey = document.getElementById('tOpenAI').value.trim();
     const googleApiKey = document.getElementById('tGoogle').value.trim();
@@ -435,6 +436,7 @@ async function main() {
     const llmModel = rest.join(':') || 'gpt-5-nano';
     await setStorage({ notionToken, openaiKey, googleApiKey, llmProvider, llmModel });
     tokensStatus.textContent = 'Saved ✓';
+    tokensStatus.classList.add('success');
     await precheck({ preserveViews: true });
     needsReloadDatabases = true;
   });
