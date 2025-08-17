@@ -159,7 +159,6 @@
           <div id="accountInfo" style="font-size:13px; color: var(--muted-foreground)">Not logged in</div>
           <div class="row" style="gap:10px">
             <button id="startNotionLogin" class="btn btn-primary" style="width:auto">Login with Notion</button>
-            <button id="connectWorkspaceBtn" class="btn btn-primary" style="width:auto; display:none">Connect another workspace</button>
             <button id="logoutBtn" class="btn btn-outline" style="width:auto; display:none">Logout</button>
           </div>
         </div>
@@ -190,6 +189,9 @@
         <div>
           <label class="section-title">Linked workspaces</label>
           <ul id="linkedWorkspaces" style="margin:6px 0 10px; padding-left: 16px"></ul>
+          <div class="row" style="margin:10px 0 6px">
+            <button id="connectWorkspaceBtn" class="btn btn-primary" style="width:auto; display:none">Connect another workspace</button>
+          </div>
         </div>
         <hr class="divider" />
         <label for="tOpenAI">OpenAI API Key</label>

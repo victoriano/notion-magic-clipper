@@ -237,9 +237,9 @@ async function openTokensView() {
       if (!workspaces.length) { list.innerHTML = '<li style="color:#999">No workspaces linked</li>'; return; }
       for (const w of workspaces) {
         const li = document.createElement('li');
-        li.style.display = 'flex'; li.style.alignItems = 'center'; li.style.gap = '8px';
+        li.style.display = 'flex'; li.style.alignItems = 'center'; li.style.gap = '14px'; li.style.marginBottom = '8px';
         const span = document.createElement('span');
-        span.textContent = `${w.workspace_name || 'Untitled'} — ${w.workspace_id}`;
+        span.textContent = `${w.workspace_name || 'Untitled'}`;
         const btn = document.createElement('button');
         btn.className = 'btn btn-outline'; btn.textContent = 'Disconnect';
         btn.addEventListener('click', async () => {
