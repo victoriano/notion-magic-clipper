@@ -153,10 +153,11 @@ async function precheck(opts = {}) {
   const pre = document.getElementById('precheck');
   const app = document.getElementById('app');
   const indicator = document.getElementById('statusIndicator');
-  const cfg = await getStorage(['notionToken', 'openaiKey', 'googleApiKey', 'llmProvider', 'llmModel', 'backendUrl']);
+  const cfg = await getStorage(['notionToken', 'openaiKey', 'googleApiKey', 'llmProvider', 'llmModel', 'backendUrl', 'workspaceTokens']);
   const provider = cfg.llmProvider || 'openai';
   const model = cfg.llmModel || 'gpt-5-nano';
-  const hasNotion = !!cfg.notionToken;
+  const tokensMap = cfg.workspaceTokens && typeof cfg.workspaceTokens === 'object' ? cfg.workspaceTokens : {};
+  const hasNotion = !!cfg.notionToken || Object.keys(tokensMap).length > 0;
   const hasOpenAI = !!cfg.openaiKey;
   const hasGoogle = !!cfg.googleApiKey;
   let hasLLM = false;
@@ -289,11 +290,54 @@ function orderDatabasesByRecentUsage(list, recentSaves, lastDatabaseId) {
 
 async function loadDatabases() {
   console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Loading databases…`);
-  const [list, stored] = await Promise.all([
-    listDatabases(''),
-    getStorage(['recentSaves', 'lastDatabaseId'])
-  ]);
-  dbList = Array.isArray(list) ? list.slice() : [];
+  const stored = await getStorage(['recentSaves', 'lastDatabaseId', 'backendUrl', 'workspaceTokens']);
+  const backendBase = (stored.backendUrl || 'http://localhost:3000').replace(/\/$/, '');
+  let tokensMap = stored.workspaceTokens && typeof stored.workspaceTokens === 'object' ? stored.workspaceTokens : {};
+  if (!Object.keys(tokensMap).length) {
+    try {
+      const res = await fetch(`${backendBase}/api/notion/workspaces`, { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        const list = Array.isArray(data.workspaces) ? data.workspaces : [];
+        const entries = await Promise.all(list.map(async (w) => {
+          try {
+            const r = await fetch(`${backendBase}/api/notion/token?workspace_id=${encodeURIComponent(w.workspace_id)}`, { credentials: 'include' });
+            if (!r.ok) throw new Error('token');
+            const j = await r.json();
+            return [w.workspace_id, j.access_token];
+          } catch { return null; }
+        }));
+        tokensMap = entries.filter(Boolean).reduce((acc, [id, tok]) => { acc[id] = tok; return acc; }, {});
+        if (Object.keys(tokensMap).length) await setStorage({ workspaceTokens: tokensMap });
+      }
+    } catch {}
+  }
+
+  let merged = [];
+  const tokenValues = Object.values(tokensMap);
+  if (!tokenValues.length) {
+    merged = await listDatabases('');
+  } else {
+    const perWorkspace = await Promise.all(tokenValues.map(async (tok) => {
+      try {
+        const body = { query: '', filter: { property: 'object', value: 'database' }, sort: { direction: 'ascending', timestamp: 'last_edited_time' } };
+        const resp = await fetch('https://api.notion.com/v1/search', { method: 'POST', headers: { 'Authorization': `Bearer ${tok}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        if (!resp.ok) throw new Error('notion');
+        const data = await resp.json();
+        const results = (data.results || []).map((item) => {
+          const title = (item.title || []).map((t) => t.plain_text).join('') || '(Sin título)';
+          const iconEmoji = item?.icon?.type === 'emoji' ? item.icon.emoji : undefined;
+          const url = item?.url || `https://www.notion.so/${String(item?.id || '').replace(/-/g, '')}`;
+          return { id: item.id, title, iconEmoji, url };
+        });
+        return results;
+      } catch { return []; }
+    }));
+    const byId = new Map();
+    for (const list of perWorkspace) { for (const db of list) { if (!byId.has(db.id)) byId.set(db.id, db); } }
+    merged = Array.from(byId.values());
+  }
+  dbList = Array.isArray(merged) ? merged.slice() : [];
   // Order by recent usage; boost lastDatabaseId
   dbList = orderDatabasesByRecentUsage(dbList, stored.recentSaves || [], stored.lastDatabaseId || '');
   dbFiltered = dbList.slice();
@@ -407,12 +451,14 @@ async function main() {
   const tokensView = document.getElementById('tokensView');
   const tokensBack = document.getElementById('tokensBack');
   const tokensSave = document.getElementById('tokensSave');
-  const startNotionOAuth = document.getElementById('startNotionOAuth');
+  const startNotionOAuth = null; // removed explicit button; login flow chains to connect
+  const startNotionLogin = document.getElementById('startNotionLogin');
   const fetchTokenFromBackend = document.getElementById('fetchTokenFromBackend');
   const tokensOpenOptions = document.getElementById('tokensOpenOptions');
   const tokensStatus = document.getElementById('tokensStatus');
   const tModel = document.getElementById('tModel');
   const appView = document.getElementById('app');
+  const tokensClear = document.getElementById('tokensClear');
   const dbSettingsView = document.getElementById('dbSettingsView');
   const openDbSettings = document.getElementById('openDbSettings');
   const dbsBack = document.getElementById('dbsBack');
@@ -437,6 +483,29 @@ async function main() {
     }
   });
   if (tokensOpenOptions) tokensOpenOptions.addEventListener('click', () => chrome.runtime.openOptionsPage());
+  if (tokensClear) tokensClear.addEventListener('click', async () => {
+    try {
+      await setStorage({
+        notionToken: '',
+        workspaceTokens: {},
+        workspaceId: '',
+        openaiKey: '',
+        googleApiKey: '',
+        llmProvider: 'openai',
+        llmModel: 'gpt-5-nano',
+        databaseSettings: {},
+        databasePrompts: {},
+        recentSaves: [],
+        lastDatabaseId: ''
+      });
+      tokensStatus.textContent = 'Local data cleared ✓';
+      tokensStatus.classList.add('success');
+      await precheck({ preserveViews: true });
+      needsReloadDatabases = true;
+    } catch (e) {
+      tokensStatus.textContent = 'Failed to clear';
+    }
+  });
   if (tokensSave) tokensSave.addEventListener('click', async () => {
     tokensStatus.textContent = '';
     tokensStatus.classList.remove('success');
@@ -455,14 +524,42 @@ async function main() {
     needsReloadDatabases = true;
   });
 
-  if (startNotionOAuth) startNotionOAuth.addEventListener('click', async () => {
+  async function ensureLoggedIn(base) {
+    try {
+      const res = await fetch(`${base}/api/notion/workspaces`, { credentials: 'include' });
+      return res.status !== 401;
+    } catch { return false; }
+  }
+
+  // no-op: connect step is chained after login callback
+
+  if (startNotionLogin) startNotionLogin.addEventListener('click', async () => {
     const { backendUrl } = await getStorage(['backendUrl']);
     const base = backendUrl || 'http://localhost:3000';
-    const startUrl = String(base).replace(/\/$/, '') + '/api/notion/start';
+    const url = String(base).replace(/\/$/, '') + '/api/auth/notion/start';
     try {
-      await chrome.tabs.create({ url: startUrl, active: true });
+      // Create the auth tab
+      const tab = await chrome.tabs.create({ url, active: true });
+      // Poll the session endpoint if Supabase redirects with access_token in URL.
+      const poll = setInterval(async () => {
+        try {
+          const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+          const current = tabs && tabs[0];
+          if (!current || !current.url) return;
+          if (current.url.includes('/auth/callback') && current.url.includes('access_token=')) {
+            try {
+              const u = new URL(current.url);
+              const access_token = u.searchParams.get('access_token');
+              if (access_token) {
+                await fetch(`${base.replace(/\/$/, '')}/api/auth/session`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ access_token }), credentials: 'include' });
+              }
+            } catch {}
+          }
+        } catch {}
+      }, 1000);
+      setTimeout(() => clearInterval(poll), 20000);
     } catch {
-      window.open(startUrl, '_blank', 'noopener,noreferrer');
+      window.open(url, '_blank', 'noopener,noreferrer');
     }
   });
 

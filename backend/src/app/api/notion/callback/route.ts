@@ -1,7 +1,7 @@
 import env from '@/lib/env';
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { supabase } from '@/lib/supabase';
+import { supabaseAdmin } from '@/lib/supabase';
 
 const NOTION_TOKEN_URL = 'https://api.notion.com/v1/oauth/token';
 
@@ -10,9 +10,13 @@ export async function GET(req: NextRequest) {
 	const code = searchParams.get('code');
 	const state = searchParams.get('state');
 	const storedState = cookies().get('notion_oauth_state')?.value;
+  const userId = cookies().get('sb_user_id')?.value;
 
 	if (!code || !state || !storedState || state !== storedState) {
 		return NextResponse.json({ error: 'Invalid OAuth state or missing code' }, { status: 400 });
+	}
+	if (!userId) {
+		return NextResponse.json({ error: 'Login required' }, { status: 401 });
 	}
 
 	try {
@@ -37,15 +41,17 @@ export async function GET(req: NextRequest) {
 		const tokenJson = await tokenRes.json();
 		// tokenJson contains access_token, workspace_id, workspace_name, bot_id, duplicated fields
 
-		const upsertRes = await supabase
-			.from('notion_tokens')
+		if (!supabaseAdmin) throw new Error('Server not configured with service role key');
+		const upsertRes = await supabaseAdmin
+			.from('notion_connections')
 			.upsert({
+				user_id: userId,
 				workspace_id: tokenJson.workspace_id,
 				workspace_name: tokenJson.workspace_name,
 				access_token: tokenJson.access_token,
 				bot_id: tokenJson.bot_id ?? null,
 				updated_at: new Date().toISOString(),
-			}, { onConflict: 'workspace_id' })
+			}, { onConflict: 'user_id,workspace_id' })
 			.select()
 			.single();
 

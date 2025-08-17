@@ -15,19 +15,29 @@ cp .env.example .env.local
 - `NOTION_REDIRECT_URI`: Must match the OAuth redirect URL configured in Notion (e.g., http://localhost:3000/api/notion/callback)
 - `SUPABASE_URL` and `SUPABASE_ANON_KEY`: From your Supabase project
 
-2. Create a table in Supabase:
+2. Create tables in Supabase:
 
 ```sql
-create table if not exists public.notion_tokens (
-  workspace_id text primary key,
+-- Users are handled by Supabase Auth
+
+create table if not exists public.notion_connections (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  workspace_id text not null,
   workspace_name text,
   access_token text not null,
   bot_id text,
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  primary key (user_id, workspace_id)
 );
 ```
 
-Ensure RLS is configured to your needs. For a simple prototype, you can disable RLS or allow inserts/updates from anon key appropriately.
+Enable RLS and use a service role key on the backend:
+
+```sql
+alter table public.notion_connections enable row level security;
+create policy "owner can read" on public.notion_connections for select using (auth.uid() = user_id);
+-- inserts/updates/deletes should be performed by the backend with service role; or scope with auth.uid() = user_id
+```
 
 3. Install deps and run (Bun):
 

@@ -155,6 +155,9 @@
       </div>
       <div id="tokensView" style="display:none">
         <h3 class="title">Tokens</h3>
+        <div class="row" style="margin:8px 0">
+          <button id="startNotionLogin" class="btn btn-primary" style="width:auto">Login with Notion (Supabase)</button>
+        </div>
         <label for="tNotionToken">Notion Integration Token</label>
         <input id="tNotionToken" type="password" placeholder="secret_..." />
         <small>
@@ -163,10 +166,6 @@
           Then share your databases with that integration. Docs:
           <a href="https://www.notion.com/help/create-integrations-with-the-notion-api" target="_blank" rel="noreferrer">Notion Help</a>.
         </small>
-        <div class="row" style="margin-top:8px; align-items: flex-end">
-          <button id="startNotionOAuth" class="btn btn-primary" style="width:auto">Sign in with Notion</button>
-          <div style="flex:1"></div>
-        </div>
         <div class="row" style="margin-top:8px; align-items: flex-end; display:none" id="advancedBackendRow">
           <div style="flex:1">
             <label for="tWorkspaceId">Workspace ID (from redirect)</label>
@@ -194,6 +193,7 @@
         <div class="row" style="margin-top:8px">
           <button id="tokensBack" class="btn">← Back</button>
           <button id="tokensSave" class="btn btn-primary" style="width:auto">Save</button>
+          <button id="tokensClear" class="btn btn-outline" style="width:auto" title="Temporarily for testing">Clear local data</button>
         </div>
         <div id="tokensStatus"></div>
         <div style="margin-top:12px">
