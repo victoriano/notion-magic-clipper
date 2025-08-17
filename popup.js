@@ -205,23 +205,29 @@ async function openTokensView() {
   const legacyToken = document.getElementById('legacyToken');
   if (legacyToken) legacyToken.style.display = showAdvanced ? 'block' : 'none';
 
-  // Populate account info
-  try {
-    const base = (backendInput?.value || 'http://localhost:3000').replace(/\/$/, '');
-    const me = await fetch(`${base}/api/auth/me`, { credentials: 'include' });
-    if (me.ok) {
-      const j = await me.json();
-      if (accountInfo) accountInfo.textContent = j.email ? `Logged in as ${j.email}` : 'Logged in';
-      if (logoutBtn) logoutBtn.style.display = 'inline-flex';
-      if (connectWorkspaceBtn) connectWorkspaceBtn.style.display = 'inline-flex';
-      if (startNotionLogin) startNotionLogin.style.display = 'none';
-    } else {
-      if (accountInfo) accountInfo.textContent = 'Not logged in';
-      if (logoutBtn) logoutBtn.style.display = 'none';
-      if (connectWorkspaceBtn) connectWorkspaceBtn.style.display = 'none';
-      if (startNotionLogin) startNotionLogin.style.display = 'inline-flex';
-    }
-  } catch {}
+  async function refreshAccountAndWorkspaces() {
+    try {
+      const base = (backendInput?.value || 'http://localhost:3000').replace(/\/$/, '');
+      const me = await fetch(`${base}/api/auth/me`, { credentials: 'include' });
+      if (me.ok) {
+        const j = await me.json();
+        if (accountInfo) accountInfo.textContent = j.email ? `Logged in as ${j.email}` : 'Logged in';
+        if (logoutBtn) logoutBtn.style.display = 'inline-flex';
+        if (connectWorkspaceBtn) connectWorkspaceBtn.style.display = 'inline-flex';
+        if (startNotionLogin) startNotionLogin.style.display = 'none';
+        await setStorage({ authLoggedIn: true });
+      } else {
+        if (accountInfo) accountInfo.textContent = 'Not logged in';
+        if (logoutBtn) logoutBtn.style.display = 'none';
+        if (connectWorkspaceBtn) connectWorkspaceBtn.style.display = 'none';
+        if (startNotionLogin) startNotionLogin.style.display = 'inline-flex';
+        await setStorage({ authLoggedIn: false });
+      }
+      await refreshLinkedWorkspaces();
+      await precheck({ preserveViews: true });
+    } catch {}
+  }
+  await refreshAccountAndWorkspaces();
 
   // Populate linked workspaces list
   async function refreshLinkedWorkspaces() {
@@ -607,10 +613,7 @@ async function main() {
               const access_token = u.searchParams.get('access_token');
               if (access_token) {
                 await fetch(`${base.replace(/\/$/, '')}/api/auth/session`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ access_token }), credentials: 'include' });
-                if (accountInfo) accountInfo.textContent = 'Logged in';
-                if (logoutBtn) logoutBtn.style.display = 'inline-flex';
-                if (connectWorkspaceBtn) connectWorkspaceBtn.style.display = 'inline-flex';
-                if (startNotionLogin) startNotionLogin.style.display = 'none';
+                await refreshAccountAndWorkspaces();
               }
             } catch {}
           }
@@ -644,7 +647,11 @@ async function main() {
       if (accountInfo) accountInfo.textContent = 'Not logged in';
       logoutBtn.style.display = 'none';
       tokensStatus.textContent = 'Logged out';
-      await precheck({ preserveViews: true });
+      const list = document.getElementById('linkedWorkspaces');
+      if (list) list.innerHTML = '<li style="color:#999">No workspaces (not logged in)</li>';
+      if (connectWorkspaceBtn) connectWorkspaceBtn.style.display = 'none';
+      if (startNotionLogin) startNotionLogin.style.display = 'inline-flex';
+      await refreshAccountAndWorkspaces();
     } catch {}
   });
 
