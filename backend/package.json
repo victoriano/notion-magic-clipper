@@ -2,6 +2,7 @@
   "name": "notion-magic-backend",
   "private": true,
   "version": "0.1.0",
+  "packageManager": "bun@1.2.8",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

@@ -163,6 +163,20 @@
           Then share your databases with that integration. Docs:
           <a href="https://www.notion.com/help/create-integrations-with-the-notion-api" target="_blank" rel="noreferrer">Notion Help</a>.
         </small>
+        <div class="row" style="margin-top:8px; align-items: flex-end">
+          <button id="startNotionOAuth" class="btn btn-primary" style="width:auto">Sign in with Notion</button>
+          <div style="flex:1"></div>
+        </div>
+        <div class="row" style="margin-top:8px; align-items: flex-end">
+          <div style="flex:1">
+            <label for="tWorkspaceId">Workspace ID (from redirect)</label>
+            <input id="tWorkspaceId" type="text" placeholder="a5c3b78f-..." />
+          </div>
+          <button id="fetchTokenFromBackend" class="btn" style="width:auto">Fetch from backend</button>
+        </div>
+        <label for="tBackendUrl">Backend URL (for Notion OAuth)</label>
+        <input id="tBackendUrl" type="text" placeholder="http://localhost:3000" />
+        <small>Points to your OAuth backend (Next.js app). Example: <code>http://localhost:3000</code>.</small>
         <hr class="divider" />
         <label for="tOpenAI">OpenAI API Key</label>
         <input id="tOpenAI" type="password" placeholder="sk-..." />

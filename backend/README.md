@@ -29,11 +29,11 @@ create table if not exists public.notion_tokens (
 
 Ensure RLS is configured to your needs. For a simple prototype, you can disable RLS or allow inserts/updates from anon key appropriately.
 
-3. Install deps and run:
+3. Install deps and run (Bun):
 
 ```bash
-npm install
-npm run dev
+bun install
+bun run dev
 ```
 
 Open http://localhost:3000 and click "Connect Notion".

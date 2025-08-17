@@ -54,6 +54,12 @@
         Then share your databases with that integration.
         Docs: <a href="https://www.notion.com/help/create-integrations-with-the-notion-api" target="_blank" rel="noreferrer">Notion Help</a>.
       </small>
+      <div style="margin-top:8px">
+        <button id="notionOauthBtn" class="btn btn-primary">Sign in with Notion</button>
+      </div>
+      <label for="backendUrl">Backend URL (for Notion OAuth)</label>
+      <input id="backendUrl" type="text" placeholder="http://localhost:3000" />
+      <small>Points to your OAuth backend (Next.js app). Example: <code>http://localhost:3000</code>.</small>
 
       <label for="openaiKey">OpenAI API Key</label>
       <input id="openaiKey" type="password" placeholder="sk-..." />

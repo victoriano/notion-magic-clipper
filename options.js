@@ -44,14 +44,17 @@ async function populateModelSelector({ openaiKey, googleApiKey, llmProvider, llm
 }
 
 async function load() {
-  const { notionToken, openaiKey, googleApiKey, openai_reasoning_effort, openai_verbosity, llmProvider, llmModel } = await get([
-    'notionToken', 'openaiKey', 'googleApiKey', 'openai_reasoning_effort', 'openai_verbosity', 'llmProvider', 'llmModel'
+  const { notionToken, openaiKey, googleApiKey, openai_reasoning_effort, openai_verbosity, llmProvider, llmModel, backendUrl } = await get([
+    'notionToken', 'openaiKey', 'googleApiKey', 'openai_reasoning_effort', 'openai_verbosity', 'llmProvider', 'llmModel', 'backendUrl'
   ]);
   if (notionToken) document.getElementById('notionToken').value = notionToken;
   if (openaiKey) document.getElementById('openaiKey').value = openaiKey;
   if (googleApiKey) document.getElementById('googleApiKey').value = googleApiKey;
   if (openai_reasoning_effort) document.getElementById('reasoning').value = openai_reasoning_effort;
   if (openai_verbosity) document.getElementById('verbosity').value = openai_verbosity;
+  const effectiveBackendUrl = backendUrl || 'http://localhost:3000';
+  const backendInput = document.getElementById('backendUrl');
+  if (backendInput) backendInput.value = effectiveBackendUrl;
   await populateModelSelector({ openaiKey, googleApiKey, llmProvider, llmModel });
 }
 
@@ -66,8 +69,16 @@ async function save() {
   const modelSel = document.getElementById('model');
   const { provider: llmProvider, model: llmModel } = parseModelValue(modelSel ? modelSel.value : 'openai:gpt-5-nano');
 
-  await set({ notionToken, openaiKey, googleApiKey, openai_reasoning_effort, openai_verbosity, llmProvider, llmModel });
+  const backendUrl = (document.getElementById('backendUrl')?.value || '').trim();
+  await set({ notionToken, openaiKey, googleApiKey, openai_reasoning_effort, openai_verbosity, llmProvider, llmModel, backendUrl });
   status.innerHTML = '<span class="success">Saved ✓</span>';
+}
+
+function openNotionOAuth() {
+  const input = document.getElementById('backendUrl');
+  const url = (input?.value || 'http://localhost:3000').trim();
+  const startUrl = url.replace(/\/$/, '') + '/api/notion/start';
+  window.open(startUrl, '_blank', 'noopener,noreferrer');
 }
 
 async function listUntitled() {
@@ -362,4 +373,5 @@ function renderAllDatabasesList(container, items, settings) {
 document.getElementById('saveBtn').addEventListener('click', save);
 document.getElementById('listUntitledBtn').addEventListener('click', listUntitled);
 document.getElementById('listAllBtn').addEventListener('click', listAllDatabasesFromOptions);
+document.getElementById('notionOauthBtn')?.addEventListener('click', openNotionOAuth);
 load();

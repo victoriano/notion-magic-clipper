@@ -153,7 +153,7 @@ async function precheck(opts = {}) {
   const pre = document.getElementById('precheck');
   const app = document.getElementById('app');
   const indicator = document.getElementById('statusIndicator');
-  const cfg = await getStorage(['notionToken', 'openaiKey', 'googleApiKey', 'llmProvider', 'llmModel']);
+  const cfg = await getStorage(['notionToken', 'openaiKey', 'googleApiKey', 'llmProvider', 'llmModel', 'backendUrl']);
   const provider = cfg.llmProvider || 'openai';
   const model = cfg.llmModel || 'gpt-5-nano';
   const hasNotion = !!cfg.notionToken;
@@ -183,11 +183,15 @@ async function openTokensView() {
   const notionInput = document.getElementById('tNotionToken');
   const openaiInput = document.getElementById('tOpenAI');
   const googleInput = document.getElementById('tGoogle');
+  const backendInput = document.getElementById('tBackendUrl');
+  const workspaceInput = document.getElementById('tWorkspaceId');
 
-  const { notionToken, openaiKey, googleApiKey, llmProvider, llmModel } = await getStorage(['notionToken', 'openaiKey', 'googleApiKey', 'llmProvider', 'llmModel']);
+  const { notionToken, openaiKey, googleApiKey, llmProvider, llmModel, backendUrl, workspaceId } = await getStorage(['notionToken', 'openaiKey', 'googleApiKey', 'llmProvider', 'llmModel', 'backendUrl', 'workspaceId']);
   if (notionInput) notionInput.value = notionToken || '';
   if (openaiInput) openaiInput.value = openaiKey || '';
   if (googleInput) googleInput.value = googleApiKey || '';
+  if (backendInput) backendInput.value = (backendUrl || 'http://localhost:3000');
+  if (workspaceInput) workspaceInput.value = workspaceId || '';
 
   // Populate model selector based on available keys
   const options = [];
@@ -397,6 +401,8 @@ async function main() {
   const tokensView = document.getElementById('tokensView');
   const tokensBack = document.getElementById('tokensBack');
   const tokensSave = document.getElementById('tokensSave');
+  const startNotionOAuth = document.getElementById('startNotionOAuth');
+  const fetchTokenFromBackend = document.getElementById('fetchTokenFromBackend');
   const tokensOpenOptions = document.getElementById('tokensOpenOptions');
   const tokensStatus = document.getElementById('tokensStatus');
   const tModel = document.getElementById('tModel');
@@ -431,15 +437,71 @@ async function main() {
     const notionToken = document.getElementById('tNotionToken').value.trim();
     const openaiKey = document.getElementById('tOpenAI').value.trim();
     const googleApiKey = document.getElementById('tGoogle').value.trim();
+    const backendUrl = document.getElementById('tBackendUrl').value.trim();
+    const workspaceId = document.getElementById('tWorkspaceId').value.trim();
     const [provider, ...rest] = String(tModel?.value || 'openai:gpt-5-nano').split(':');
     const llmProvider = provider || 'openai';
     const llmModel = rest.join(':') || 'gpt-5-nano';
-    await setStorage({ notionToken, openaiKey, googleApiKey, llmProvider, llmModel });
+    await setStorage({ notionToken, openaiKey, googleApiKey, llmProvider, llmModel, backendUrl, workspaceId });
     tokensStatus.textContent = 'Saved ✓';
     tokensStatus.classList.add('success');
     await precheck({ preserveViews: true });
     needsReloadDatabases = true;
   });
+
+  if (startNotionOAuth) startNotionOAuth.addEventListener('click', async () => {
+    const { backendUrl } = await getStorage(['backendUrl']);
+    const base = backendUrl || 'http://localhost:3000';
+    const startUrl = String(base).replace(/\/$/, '') + '/api/notion/start';
+    try {
+      await chrome.tabs.create({ url: startUrl, active: true });
+    } catch {
+      window.open(startUrl, '_blank', 'noopener,noreferrer');
+    }
+  });
+
+  async function handleFetchTokenFromBackend() {
+    console.log('[NotionMagicClipper][Popup] Fetch from backend clicked');
+    if (tokensStatus) tokensStatus.textContent = 'Fetching token from backend…';
+    const { backendUrl } = await getStorage(['backendUrl']);
+    let wsId = (document.getElementById('tWorkspaceId')?.value || '').trim();
+    const base = (backendUrl || 'http://localhost:3000').replace(/\/$/, '');
+    if (!wsId) {
+      try {
+        const tab = await getCurrentTab();
+        const u = new URL(tab?.url || '');
+        const fromTab = u.searchParams.get('workspace_id');
+        if (fromTab) {
+          wsId = fromTab;
+          const input = document.getElementById('tWorkspaceId');
+          if (input) input.value = wsId;
+          await setStorage({ workspaceId: wsId });
+        }
+      } catch {}
+    }
+    if (!wsId) { if (tokensStatus) tokensStatus.textContent = 'Enter workspace ID from the redirect URL (tip: open the /connected tab and click this again).'; return; }
+    const url = `${base}/api/notion/token?workspace_id=${encodeURIComponent(wsId)}`;
+    console.log('[NotionMagicClipper][Popup] Fetch URL:', url);
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10000);
+      const resp = await fetch(url, { method: 'GET', signal: controller.signal });
+      clearTimeout(timeout);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const json = await resp.json();
+      if (!json?.access_token) throw new Error('Token not found for this workspace');
+      document.getElementById('tNotionToken').value = json.access_token;
+      await setStorage({ notionToken: json.access_token, workspaceId: wsId });
+      if (tokensStatus) { tokensStatus.textContent = 'Fetched from backend ✓'; tokensStatus.classList.add('success'); }
+      await precheck({ preserveViews: true });
+      needsReloadDatabases = true;
+    } catch (e) {
+      console.error('[NotionMagicClipper][Popup] Fetch from backend failed', e);
+      if (tokensStatus) tokensStatus.textContent = `Fetch failed: ${String(e?.message || e)}`;
+    }
+  }
+  if (fetchTokenFromBackend) fetchTokenFromBackend.addEventListener('click', handleFetchTokenFromBackend);
+  try { window.fetchFromBackend = handleFetchTokenFromBackend; } catch {}
 
   // Database settings mini-page
   function updateCustomizeVisibility() {
