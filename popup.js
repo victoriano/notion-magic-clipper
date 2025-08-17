@@ -190,6 +190,7 @@ async function openTokensView() {
   const advancedBackendUrl = document.getElementById('advancedBackendUrl');
   const accountInfo = document.getElementById('accountInfo');
   const logoutBtn = document.getElementById('logoutBtn');
+  const connectWorkspaceBtn = document.getElementById('connectWorkspaceBtn');
 
   const { notionToken, openaiKey, googleApiKey, llmProvider, llmModel, backendUrl, workspaceId } = await getStorage(['notionToken', 'openaiKey', 'googleApiKey', 'llmProvider', 'llmModel', 'backendUrl', 'workspaceId']);
   if (notionInput) notionInput.value = notionToken || '';
@@ -212,11 +213,47 @@ async function openTokensView() {
       const j = await me.json();
       if (accountInfo) accountInfo.textContent = j.email ? `Logged in as ${j.email}` : 'Logged in';
       if (logoutBtn) logoutBtn.style.display = 'inline-flex';
+      if (connectWorkspaceBtn) connectWorkspaceBtn.style.display = 'inline-flex';
+      if (startNotionLogin) startNotionLogin.style.display = 'none';
     } else {
       if (accountInfo) accountInfo.textContent = 'Not logged in';
       if (logoutBtn) logoutBtn.style.display = 'none';
+      if (connectWorkspaceBtn) connectWorkspaceBtn.style.display = 'none';
+      if (startNotionLogin) startNotionLogin.style.display = 'inline-flex';
     }
   } catch {}
+
+  // Populate linked workspaces list
+  async function refreshLinkedWorkspaces() {
+    const list = document.getElementById('linkedWorkspaces');
+    if (!list) return;
+    list.innerHTML = '';
+    try {
+      const base = (backendInput?.value || 'http://localhost:3000').replace(/\/$/, '');
+      const res = await fetch(`${base}/api/notion/workspaces`, { credentials: 'include' });
+      if (!res.ok) { list.innerHTML = '<li style="color:#999">No workspaces (not logged in)</li>'; return; }
+      const data = await res.json();
+      const workspaces = Array.isArray(data.workspaces) ? data.workspaces : [];
+      if (!workspaces.length) { list.innerHTML = '<li style="color:#999">No workspaces linked</li>'; return; }
+      for (const w of workspaces) {
+        const li = document.createElement('li');
+        li.style.display = 'flex'; li.style.alignItems = 'center'; li.style.gap = '8px';
+        const span = document.createElement('span');
+        span.textContent = `${w.workspace_name || 'Untitled'} — ${w.workspace_id}`;
+        const btn = document.createElement('button');
+        btn.className = 'btn btn-outline'; btn.textContent = 'Disconnect';
+        btn.addEventListener('click', async () => {
+          const ok = confirm('Disconnect this workspace?');
+          if (!ok) return;
+          const r = await fetch(`${base}/api/notion/connection?workspace_id=${encodeURIComponent(w.workspace_id)}`, { method: 'DELETE', credentials: 'include' });
+          if (r.ok) { await setStorage({ workspaceTokens: {} }); await refreshLinkedWorkspaces(); await precheck({ preserveViews: true }); }
+        });
+        li.appendChild(span); li.appendChild(btn);
+        list.appendChild(li);
+      }
+    } catch { list.innerHTML = '<li style="color:#999">Failed to load</li>'; }
+  }
+  await refreshLinkedWorkspaces();
 
   // Populate model selector based on available keys
   const options = [];
@@ -572,6 +609,8 @@ async function main() {
                 await fetch(`${base.replace(/\/$/, '')}/api/auth/session`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ access_token }), credentials: 'include' });
                 if (accountInfo) accountInfo.textContent = 'Logged in';
                 if (logoutBtn) logoutBtn.style.display = 'inline-flex';
+                if (connectWorkspaceBtn) connectWorkspaceBtn.style.display = 'inline-flex';
+                if (startNotionLogin) startNotionLogin.style.display = 'none';
               }
             } catch {}
           }
@@ -581,6 +620,15 @@ async function main() {
     } catch {
       window.open(url, '_blank', 'noopener,noreferrer');
     }
+  });
+
+  if (connectWorkspaceBtn) connectWorkspaceBtn.addEventListener('click', async () => {
+    console.log('[NotionMagicClipper][Popup] Connect another workspace clicked');
+    const { backendUrl } = await getStorage(['backendUrl']);
+    const base = (backendUrl || 'http://localhost:3000').replace(/\/$/, '');
+    const startUrl = base + '/api/notion/start';
+    try { await chrome.tabs.create({ url: startUrl, active: true }); }
+    catch { window.open(startUrl, '_blank', 'noopener,noreferrer'); }
   });
 
   if (logoutBtn) logoutBtn.addEventListener('click', async (e) => {
