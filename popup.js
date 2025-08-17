@@ -583,14 +583,20 @@ async function main() {
     }
   });
 
-  if (logoutBtn) logoutBtn.addEventListener('click', async () => {
+  if (logoutBtn) logoutBtn.addEventListener('click', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
     try {
-      const base = (backendInput?.value || 'http://localhost:3000').replace(/\/$/, '');
-      await fetch(`${base}/api/auth/logout`, { method: 'POST', credentials: 'include' });
+      console.log('[NotionMagicClipper][Popup] Logout clicked');
+      const { backendUrl } = await getStorage(['backendUrl']);
+      const base = (backendUrl || 'http://localhost:3000').replace(/\/$/, '');
+      const resp = await fetch(`${base}/api/auth/logout`, { method: 'POST', credentials: 'include' });
+      console.log('[NotionMagicClipper][Popup] Logout response', resp.status);
       await setStorage({ workspaceTokens: {}, notionToken: '' });
       if (accountInfo) accountInfo.textContent = 'Not logged in';
       logoutBtn.style.display = 'none';
       tokensStatus.textContent = 'Logged out';
+      await precheck({ preserveViews: true });
     } catch {}
   });
 
