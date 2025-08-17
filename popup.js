@@ -157,18 +157,18 @@ async function precheck(opts = {}) {
   const provider = cfg.llmProvider || 'openai';
   const model = cfg.llmModel || 'gpt-5-nano';
   const tokensMap = cfg.workspaceTokens && typeof cfg.workspaceTokens === 'object' ? cfg.workspaceTokens : {};
-  const hasNotion = !!cfg.notionToken || Object.keys(tokensMap).length > 0;
+  const hasNotion = Object.keys(tokensMap).length > 0 || !!cfg.notionToken;
   const hasOpenAI = !!cfg.openaiKey;
   const hasGoogle = !!cfg.googleApiKey;
   let hasLLM = false;
   if (provider === 'openai') hasLLM = hasOpenAI;
   else if (provider === 'google') hasLLM = hasGoogle;
   else hasLLM = hasOpenAI || hasGoogle; // fallback if unknown provider
-  const ok = hasNotion && hasLLM;
+  const ok = hasNotion; // account connected is sufficient to turn green
   if (indicator) {
     indicator.classList.toggle('ok', ok);
     indicator.classList.toggle('err', !ok);
-    indicator.title = ok ? 'Tokens configured' : 'Tokens missing — click to configure';
+    indicator.title = ok ? 'Account connected' : 'Not connected — click to configure';
     indicator.setAttribute('aria-label', indicator.title);
   }
   if (!opts.preserveViews) app.style.display = 'block';
@@ -188,6 +188,8 @@ async function openTokensView() {
   const workspaceInput = document.getElementById('tWorkspaceId');
   const advancedBackendRow = document.getElementById('advancedBackendRow');
   const advancedBackendUrl = document.getElementById('advancedBackendUrl');
+  const accountInfo = document.getElementById('accountInfo');
+  const logoutBtn = document.getElementById('logoutBtn');
 
   const { notionToken, openaiKey, googleApiKey, llmProvider, llmModel, backendUrl, workspaceId } = await getStorage(['notionToken', 'openaiKey', 'googleApiKey', 'llmProvider', 'llmModel', 'backendUrl', 'workspaceId']);
   if (notionInput) notionInput.value = notionToken || '';
@@ -195,10 +197,26 @@ async function openTokensView() {
   if (googleInput) googleInput.value = googleApiKey || '';
   if (backendInput) backendInput.value = (backendUrl || 'http://localhost:3000');
   if (workspaceInput) workspaceInput.value = workspaceId || '';
-  // Hide backend UI by default; show only if a dev flag is set
+  // Hide backend + legacy token UI by default; show only if a dev flag is set
   const showAdvanced = /\bdev=1\b/i.test(location.search) || (await getStorage(['showAdvanced']))?.showAdvanced === true;
   if (advancedBackendRow) advancedBackendRow.style.display = showAdvanced ? 'flex' : 'none';
   if (advancedBackendUrl) advancedBackendUrl.style.display = showAdvanced ? 'block' : 'none';
+  const legacyToken = document.getElementById('legacyToken');
+  if (legacyToken) legacyToken.style.display = showAdvanced ? 'block' : 'none';
+
+  // Populate account info
+  try {
+    const base = (backendInput?.value || 'http://localhost:3000').replace(/\/$/, '');
+    const me = await fetch(`${base}/api/auth/me`, { credentials: 'include' });
+    if (me.ok) {
+      const j = await me.json();
+      if (accountInfo) accountInfo.textContent = j.email ? `Logged in as ${j.email}` : 'Logged in';
+      if (logoutBtn) logoutBtn.style.display = 'inline-flex';
+    } else {
+      if (accountInfo) accountInfo.textContent = 'Not logged in';
+      if (logoutBtn) logoutBtn.style.display = 'none';
+    }
+  } catch {}
 
   // Populate model selector based on available keys
   const options = [];
@@ -552,6 +570,8 @@ async function main() {
               const access_token = u.searchParams.get('access_token');
               if (access_token) {
                 await fetch(`${base.replace(/\/$/, '')}/api/auth/session`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ access_token }), credentials: 'include' });
+                if (accountInfo) accountInfo.textContent = 'Logged in';
+                if (logoutBtn) logoutBtn.style.display = 'inline-flex';
               }
             } catch {}
           }
@@ -561,6 +581,17 @@ async function main() {
     } catch {
       window.open(url, '_blank', 'noopener,noreferrer');
     }
+  });
+
+  if (logoutBtn) logoutBtn.addEventListener('click', async () => {
+    try {
+      const base = (backendInput?.value || 'http://localhost:3000').replace(/\/$/, '');
+      await fetch(`${base}/api/auth/logout`, { method: 'POST', credentials: 'include' });
+      await setStorage({ workspaceTokens: {}, notionToken: '' });
+      if (accountInfo) accountInfo.textContent = 'Not logged in';
+      logoutBtn.style.display = 'none';
+      tokensStatus.textContent = 'Logged out';
+    } catch {}
   });
 
   async function handleFetchTokenFromBackend() {
