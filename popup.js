@@ -185,6 +185,8 @@ async function openTokensView() {
   const googleInput = document.getElementById('tGoogle');
   const backendInput = document.getElementById('tBackendUrl');
   const workspaceInput = document.getElementById('tWorkspaceId');
+  const advancedBackendRow = document.getElementById('advancedBackendRow');
+  const advancedBackendUrl = document.getElementById('advancedBackendUrl');
 
   const { notionToken, openaiKey, googleApiKey, llmProvider, llmModel, backendUrl, workspaceId } = await getStorage(['notionToken', 'openaiKey', 'googleApiKey', 'llmProvider', 'llmModel', 'backendUrl', 'workspaceId']);
   if (notionInput) notionInput.value = notionToken || '';
@@ -192,6 +194,10 @@ async function openTokensView() {
   if (googleInput) googleInput.value = googleApiKey || '';
   if (backendInput) backendInput.value = (backendUrl || 'http://localhost:3000');
   if (workspaceInput) workspaceInput.value = workspaceId || '';
+  // Hide backend UI by default; show only if a dev flag is set
+  const showAdvanced = /\bdev=1\b/i.test(location.search) || (await getStorage(['showAdvanced']))?.showAdvanced === true;
+  if (advancedBackendRow) advancedBackendRow.style.display = showAdvanced ? 'flex' : 'none';
+  if (advancedBackendUrl) advancedBackendUrl.style.display = showAdvanced ? 'block' : 'none';
 
   // Populate model selector based on available keys
   const options = [];
