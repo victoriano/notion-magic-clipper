@@ -18,7 +18,18 @@ export async function GET(_req: NextRequest) {
         await fetch('/api/auth/session', {method:'POST',headers:{'Content-Type':'application/json'}, body: JSON.stringify({ access_token }), credentials:'include'});
       }
     } catch (e) { console.error('callback error', e); }
-    // Chain directly into Notion workspace connect so users only click once
+    // After setting session, check if user already linked any workspaces.
+    // If yes, go back to the app; if not, start the Notion connect flow.
+    try {
+      var res = await fetch('/api/notion/workspaces', { credentials: 'include' });
+      if (res.ok) {
+        var j = await res.json().catch(()=>({workspaces:[]}));
+        if (Array.isArray(j.workspaces) && j.workspaces.length > 0) {
+          location.replace('/connected');
+          return;
+        }
+      }
+    } catch {}
     location.replace('/api/notion/start');
   })();
   </script></body></html>`;
