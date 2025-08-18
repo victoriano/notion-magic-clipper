@@ -1,0 +1,16 @@
+{
+  "name": "notion-gpt5nano-extension",
+  "private": true,
+  "packageManager": "bun@1.2.8",
+  "version": "0.0.0",
+  "workspaces": [
+    "backend",
+    "clients/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "package:extension": "bun scripts/package-extension.ts"
+  }
+}
+
+
