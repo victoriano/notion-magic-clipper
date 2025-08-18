@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Notion Magic Clipper",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Notion Magic Clipper: Save the current page into a Notion database and use GPT-5 Nano to auto-complete properties.",
   "permissions": [
     "storage",
@@ -35,20 +35,6 @@
     "32": "icons/icon32.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
-  },
+  }
   
-  "content_scripts": [
-    {
-      "matches": [
-        "<all_urls>"
-      ],
-      "js": [
-        "vendor/readability/JSDOMParser.js",
-        "vendor/readability/Readability.js",
-        "vendor/readability/Readability-readerable.js",
-        "contentScript.js"
-      ],
-      "run_at": "document_idle"
-    }
-  ]
 }

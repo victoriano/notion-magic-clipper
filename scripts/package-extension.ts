@@ -32,7 +32,12 @@ async function assertFile(relativePath: string, baseDir: string) {
 async function validateExtensionLayout(extDir: string): Promise<{ version: string; filesToZip: string[] }> {
   const manifestPath = path.join(extDir, 'manifest.json');
   const raw = await fs.readFile(manifestPath, 'utf8');
-  const manifest: ManifestV3 = JSON.parse(raw);
+  // Be tolerant to trailing commas or comments (shouldn't exist, but helps avoid CI hiccups)
+  const cleaned = raw
+    .replace(/\/\*[\s\S]*?\*\//g, '') // block comments
+    .replace(/(^|[^:])\/\/.*$/gm, '$1') // line comments
+    .replace(/,\s*(\}|\])/g, '$1'); // trailing commas
+  const manifest: ManifestV3 = JSON.parse(cleaned);
 
   if (!manifest?.version) throw new Error('manifest.json: missing version');
 
