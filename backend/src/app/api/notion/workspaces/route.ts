@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
 	async function getAccountInfo(token: string | null) {
 		if (!token) return { account_email: null as string | null, account_name: null as string | null };
 		try {
-			const resp = await fetch('https://api.notion.com/v1/users/me', {
+			const resp = await fetch('https://api.notion.com/v1/users', {
 				headers: {
 					'Authorization': `Bearer ${token}`,
 					'Notion-Version': '2022-06-28',
@@ -41,8 +41,11 @@ export async function GET(req: NextRequest) {
 			});
 			if (!resp.ok) return { account_email: null, account_name: null };
 			const j = await resp.json();
-			const email = j?.person?.email || null;
-			const name = j?.name || null;
+			const list = Array.isArray(j?.results) ? j.results : [];
+			// pick the first real person (not bot); prefer those with email
+			let person = list.find((u: any) => u?.type === 'person' && u?.person?.email) || list.find((u: any) => u?.type === 'person');
+			const email = person?.person?.email || null;
+			const name = person?.name || null;
 			return { account_email: email, account_name: name };
 		} catch { return { account_email: null, account_name: null }; }
 	}
