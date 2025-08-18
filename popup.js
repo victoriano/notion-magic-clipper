@@ -247,6 +247,7 @@ async function openTokensView() {
         const span = document.createElement('span');
         const acct = w.account_email || w.account_name ? ` — ${w.account_name || w.account_email}` : '';
         span.textContent = `${w.workspace_name || 'Untitled'}${acct}`;
+        if (w.account_email) span.title = w.account_email;
         const btn = document.createElement('button');
         btn.className = 'btn btn-outline'; btn.textContent = 'Disconnect';
         btn.addEventListener('click', async () => {
