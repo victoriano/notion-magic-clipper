@@ -245,7 +245,8 @@ async function openTokensView() {
         const li = document.createElement('li');
         li.style.display = 'flex'; li.style.alignItems = 'center'; li.style.gap = '14px'; li.style.marginBottom = '8px';
         const span = document.createElement('span');
-        span.textContent = `${w.workspace_name || 'Untitled'}`;
+        const acct = w.account_email || w.account_name ? ` — ${w.account_name || w.account_email}` : '';
+        span.textContent = `${w.workspace_name || 'Untitled'}${acct}`;
         const btn = document.createElement('button');
         btn.className = 'btn btn-outline'; btn.textContent = 'Disconnect';
         btn.addEventListener('click', async () => {
