@@ -10,6 +10,9 @@ export default function HomePage() {
 			<p>
 				<a href="/privacy" style={{ color: '#2563eb' }}>Privacy policy</a>
 			</p>
+			<p>
+				<a href="/terms" style={{ color: '#2563eb' }}>Terms of Use</a>
+			</p>
 		</main>
 	);
 }
