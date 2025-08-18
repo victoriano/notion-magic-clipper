@@ -52,7 +52,9 @@ async function getConfig() {
         'databasePrompts',
         'databaseSettings',
         'llmProvider',
-        'llmModel'
+        'llmModel',
+        'workspaceTokens',
+        'dbWorkspaceMap'
       ],
       (res) => resolve(res)
     );
@@ -60,12 +62,13 @@ async function getConfig() {
 }
 
 // Notion API helpers
-async function notionFetch(path, options = {}) {
+async function notionFetch(path, options = {}, tokenOverride) {
   const { notionToken } = await getConfig();
-  if (!notionToken) throw new Error('Missing Notion token. Configure it.');
+  const effectiveToken = tokenOverride || notionToken;
+  if (!effectiveToken) throw new Error('Missing Notion token. Configure it.');
 
   const headers = {
-    'Authorization': `Bearer ${notionToken}`,
+    'Authorization': `Bearer ${effectiveToken}`,
     'Notion-Version': NOTION_VERSION,
     'Content-Type': 'application/json',
     ...(options.headers || {})
@@ -105,11 +108,11 @@ async function listDatabases(query = '') {
   return results;
 }
 
-async function getDatabase(databaseId) {
-  return notionFetch(`/databases/${databaseId}`);
+async function getDatabase(databaseId, token) {
+  return notionFetch(`/databases/${databaseId}`, {}, token);
 }
 
-async function createPageInDatabase(databaseId, properties, pageContentBlocks = []) {
+async function createPageInDatabase(databaseId, properties, pageContentBlocks = [], token) {
   const body = {
     parent: { database_id: databaseId },
     properties,
@@ -118,22 +121,22 @@ async function createPageInDatabase(databaseId, properties, pageContentBlocks = 
   return notionFetch('/pages', {
     method: 'POST',
     body: JSON.stringify(body)
-  });
+  }, token);
 }
 
 // Append up to 100 child blocks to a page or block
-async function appendChildrenBlocks(parentBlockId, children = []) {
+async function appendChildrenBlocks(parentBlockId, children = [], token) {
   if (!Array.isArray(children) || children.length === 0) return null;
   return notionFetch(`/blocks/${parentBlockId}/children`, {
     method: 'PATCH',
     body: JSON.stringify({ children })
-  });
+  }, token);
 }
 
 // Start a direct (single-part) file upload; returns { file_upload_id, upload_url }
-async function startFileUpload(filename) {
+async function startFileUpload(filename, token) {
   const body = { mode: 'single_part', filename: filename || 'upload.bin' };
-  const data = await notionFetch('/file_uploads', { method: 'POST', body: JSON.stringify(body) });
+  const data = await notionFetch('/file_uploads', { method: 'POST', body: JSON.stringify(body) }, token);
   // Return as much as possible to support different upload styles (PUT vs POST form)
   return {
     id: data?.id,
@@ -355,9 +358,9 @@ async function recordRecentSave(entry) {
 }
 
 // Ensure select/multi_select options exist in the database schema; create missing ones
-async function ensureSelectOptions(databaseId, props) {
+async function ensureSelectOptions(databaseId, props, token) {
   if (!props || typeof props !== 'object') return;
-  const db = await getDatabase(databaseId);
+  const db = await getDatabase(databaseId, token);
   const updates = {};
 
   function findExistingFallbackName(def) {
@@ -439,7 +442,7 @@ async function ensureSelectOptions(databaseId, props) {
     await notionFetch(`/databases/${databaseId}`, {
       method: 'PATCH',
       body: JSON.stringify({ properties: payload })
-    });
+    }, token);
   }
 }
 
@@ -769,8 +772,42 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === 'LIST_DATABASES') {
       try {
         dbgBg('LIST_DATABASES: query =', message.query);
-        const { notionSearchQuery } = await getConfig();
-        const bases = await listDatabases(message.query ?? notionSearchQuery ?? '');
+        const { notionSearchQuery, workspaceTokens } = await getConfig();
+        const tokensMap = workspaceTokens && typeof workspaceTokens === 'object' ? workspaceTokens : {};
+        const tokenValues = Object.values(tokensMap);
+        let bases = [];
+        if (tokenValues.length === 0) {
+          bases = await listDatabases(message.query ?? notionSearchQuery ?? '');
+        } else {
+          const body = { query: message.query ?? notionSearchQuery ?? '', filter: { property: 'object', value: 'database' }, sort: { direction: 'ascending', timestamp: 'last_edited_time' } };
+          const per = await Promise.all(tokenValues.map(async (tok) => {
+            try {
+              const data = await notionFetch('/search', { method: 'POST', body: JSON.stringify(body) }, tok);
+              const results = (data.results || []).map((item) => {
+                const title = (item.title || []).map((t) => t.plain_text).join('') || '(Sin título)';
+                const iconEmoji = item?.icon?.type === 'emoji' ? item.icon.emoji : undefined;
+                const url = item?.url || `https://www.notion.so/${String(item?.id || '').replace(/-/g, '')}`;
+                return { id: item.id, title, iconEmoji, url };
+              });
+              return results;
+            } catch { return []; }
+          }));
+          const byId = new Map();
+          for (const list of per) { for (const db of list) { if (!byId.has(db.id)) byId.set(db.id, db); } }
+          bases = Array.from(byId.values());
+        }
+        // Persist a basic dbId->workspaceId map for later saves
+        try {
+          const map = {};
+          if (Array.isArray(bases)) {
+            for (const db of bases) {
+              // We can't infer workspaceId directly from /search; mark unknown
+              map[db.id] = map[db.id] || null;
+            }
+          }
+          const prev = await getConfig();
+          await set({ dbWorkspaceMap: { ...(prev.dbWorkspaceMap || {}), ...map } });
+        } catch {}
         sendResponse({ ok: true, databases: bases });
       } catch (e) {
         sendResponse({ ok: false, error: String(e.message || e) });
@@ -805,7 +842,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === 'START_FILE_UPLOAD') {
       try {
         const { filename } = message || {};
-        const res = await startFileUpload(filename);
+        const { workspaceTokens, dbWorkspaceMap } = await getConfig();
+        const tokensMap = workspaceTokens && typeof workspaceTokens === 'object' ? workspaceTokens : {};
+        // We don't know target DB here; fallback to first token
+        const token = Object.values(tokensMap)[0] || null;
+        const res = await startFileUpload(filename, token);
         if (!res?.file_upload_id || !res?.upload_url) throw new Error('Failed to start file upload');
         sendResponse({ ok: true, ...res });
       } catch (e) {
@@ -842,7 +883,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
         } catch {}
 
-        const db = await getDatabase(databaseId);
+        const { workspaceTokens, dbWorkspaceMap } = await getConfig();
+        const tokensMap = workspaceTokens && typeof workspaceTokens === 'object' ? workspaceTokens : {};
+        const wsIdHint = dbWorkspaceMap && typeof dbWorkspaceMap === 'object' ? dbWorkspaceMap[databaseId] : null;
+        let tokenForDb = wsIdHint && tokensMap[wsIdHint] ? tokensMap[wsIdHint] : Object.values(tokensMap)[0];
+        let db;
+        // Probe tokens if needed to find one that can read this database
+        if (!tokenForDb) throw new Error('Missing Notion token. Configure it.');
+        try {
+          db = await getDatabase(databaseId, tokenForDb);
+        } catch (e) {
+          const tokens = Object.entries(tokensMap);
+          for (const [wsId, tok] of tokens) {
+            if (tok === tokenForDb) continue;
+            try {
+              db = await getDatabase(databaseId, tok);
+              tokenForDb = tok;
+              // Cache mapping for future saves
+              try { const prev = await getConfig(); const map = Object.assign({}, prev.dbWorkspaceMap || {}); map[databaseId] = wsId; await set({ dbWorkspaceMap: map }); } catch {}
+              break;
+            } catch {}
+          }
+          if (!db) throw e;
+        }
         dbgBg('SAVE_TO_NOTION: fetched database schema');
         const schemaForLLM = extractSchemaForPrompt(db);
         dbgBg('SAVE_TO_NOTION: schemaForLLM', sanitizeForLog(schemaForLLM));
@@ -1368,7 +1431,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
         }
         // Ensure select options exist (auto-create missing ones)
-        await ensureSelectOptions(databaseId, safeProps);
+        await ensureSelectOptions(databaseId, safeProps, tokenForDb);
         dbgBg('SAVE_TO_NOTION: ensured select options (props sent to check)', sanitizeForLog(safeProps));
         // Do not prepend bookmark/note. Note becomes extra LLM context only.
         const blocks = attachmentBlocks.concat(children);
@@ -1383,7 +1446,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const firstBatch = blocks.slice(0, 100);
         debugReport.finalChildrenCount = blocks.length;
         try { debugReport.propertiesKeys = Object.keys(safeProps || {}); } catch {}
-        const created = await createPageInDatabase(databaseId, safeProps, firstBatch);
+        const created = await createPageInDatabase(databaseId, safeProps, firstBatch, tokenForDb);
         const t1 = Date.now();
         dbgBg('SAVE_TO_NOTION: page created', sanitizeForLog({ id: created?.id, url: created?.url || created?.public_url, properties: created?.properties }));
         const pageUrl = created?.url || created?.public_url || '';
@@ -1393,7 +1456,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         for (let i = 0; i < rest.length && parentId; i += 100) {
           const chunk = rest.slice(i, i + 100);
           try {
-            await appendChildrenBlocks(parentId, chunk);
+            await appendChildrenBlocks(parentId, chunk, tokenForDb);
             dbgBg('SAVE_TO_NOTION: appended children chunk', { offset: i, count: chunk.length });
           } catch (e) {
             dbgBg('SAVE_TO_NOTION: append failed', { offset: i, count: chunk.length, error: String(e?.message || e) });
