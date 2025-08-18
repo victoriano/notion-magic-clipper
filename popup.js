@@ -92,9 +92,9 @@ function setSelectedDb(id) {
     if (el.dataset.id === dbSelectedId) el.setAttribute('aria-selected', 'true');
     else el.removeAttribute('aria-selected');
   });
-  // update settings link label
-  const openBtn = document.getElementById('openDbSettings');
-  if (openBtn) openBtn.textContent = 'Custom save format';
+  // update settings link label without destroying icon
+  const openBtnLabel = document.getElementById('openDbSettingsLabel');
+  if (openBtnLabel) openBtnLabel.textContent = 'Custom save format';
 }
 
 function filterDbList(term) {
@@ -153,21 +153,22 @@ async function precheck(opts = {}) {
   const pre = document.getElementById('precheck');
   const app = document.getElementById('app');
   const indicator = document.getElementById('statusIndicator');
-  const cfg = await getStorage(['notionToken', 'openaiKey', 'googleApiKey', 'llmProvider', 'llmModel']);
+  const cfg = await getStorage(['notionToken', 'openaiKey', 'googleApiKey', 'llmProvider', 'llmModel', 'backendUrl', 'workspaceTokens']);
   const provider = cfg.llmProvider || 'openai';
   const model = cfg.llmModel || 'gpt-5-nano';
-  const hasNotion = !!cfg.notionToken;
+  const tokensMap = cfg.workspaceTokens && typeof cfg.workspaceTokens === 'object' ? cfg.workspaceTokens : {};
+  const hasNotion = Object.keys(tokensMap).length > 0 || !!cfg.notionToken;
   const hasOpenAI = !!cfg.openaiKey;
   const hasGoogle = !!cfg.googleApiKey;
   let hasLLM = false;
   if (provider === 'openai') hasLLM = hasOpenAI;
   else if (provider === 'google') hasLLM = hasGoogle;
   else hasLLM = hasOpenAI || hasGoogle; // fallback if unknown provider
-  const ok = hasNotion && hasLLM;
+  const ok = hasNotion; // account connected is sufficient to turn green
   if (indicator) {
     indicator.classList.toggle('ok', ok);
     indicator.classList.toggle('err', !ok);
-    indicator.title = ok ? 'Tokens configured' : 'Tokens missing — click to configure';
+    indicator.title = ok ? 'Account connected' : 'Not connected — click to configure';
     indicator.setAttribute('aria-label', indicator.title);
   }
   if (!opts.preserveViews) app.style.display = 'block';
@@ -183,11 +184,84 @@ async function openTokensView() {
   const notionInput = document.getElementById('tNotionToken');
   const openaiInput = document.getElementById('tOpenAI');
   const googleInput = document.getElementById('tGoogle');
+  const backendInput = document.getElementById('tBackendUrl');
+  const workspaceInput = document.getElementById('tWorkspaceId');
+  const advancedBackendRow = document.getElementById('advancedBackendRow');
+  const advancedBackendUrl = document.getElementById('advancedBackendUrl');
+  const accountInfo = document.getElementById('accountInfo');
+  const logoutBtn = document.getElementById('logoutBtn');
+  const connectWorkspaceBtn = document.getElementById('connectWorkspaceBtn');
 
-  const { notionToken, openaiKey, googleApiKey, llmProvider, llmModel } = await getStorage(['notionToken', 'openaiKey', 'googleApiKey', 'llmProvider', 'llmModel']);
+  const { notionToken, openaiKey, googleApiKey, llmProvider, llmModel, backendUrl, workspaceId } = await getStorage(['notionToken', 'openaiKey', 'googleApiKey', 'llmProvider', 'llmModel', 'backendUrl', 'workspaceId']);
   if (notionInput) notionInput.value = notionToken || '';
   if (openaiInput) openaiInput.value = openaiKey || '';
   if (googleInput) googleInput.value = googleApiKey || '';
+  if (backendInput) backendInput.value = (backendUrl || 'http://localhost:3000');
+  if (workspaceInput) workspaceInput.value = workspaceId || '';
+  // Hide backend + legacy token UI by default; show only if a dev flag is set
+  const showAdvanced = /\bdev=1\b/i.test(location.search) || (await getStorage(['showAdvanced']))?.showAdvanced === true;
+  if (advancedBackendRow) advancedBackendRow.style.display = showAdvanced ? 'flex' : 'none';
+  if (advancedBackendUrl) advancedBackendUrl.style.display = showAdvanced ? 'block' : 'none';
+  const legacyToken = document.getElementById('legacyToken');
+  if (legacyToken) legacyToken.style.display = showAdvanced ? 'block' : 'none';
+
+  async function refreshAccountAndWorkspaces() {
+    try {
+      const base = (backendInput?.value || 'http://localhost:3000').replace(/\/$/, '');
+      const me = await fetch(`${base}/api/auth/me`, { credentials: 'include' });
+      if (me.ok) {
+        const j = await me.json();
+        if (accountInfo) accountInfo.textContent = j.email ? `Logged in as ${j.email}` : 'Logged in';
+        if (logoutBtn) logoutBtn.style.display = 'inline-flex';
+        if (connectWorkspaceBtn) connectWorkspaceBtn.style.display = 'inline-flex';
+        if (startNotionLogin) startNotionLogin.style.display = 'none';
+        await setStorage({ authLoggedIn: true });
+      } else {
+        if (accountInfo) accountInfo.textContent = 'Not logged in';
+        if (logoutBtn) logoutBtn.style.display = 'none';
+        if (connectWorkspaceBtn) connectWorkspaceBtn.style.display = 'none';
+        if (startNotionLogin) startNotionLogin.style.display = 'inline-flex';
+        await setStorage({ authLoggedIn: false });
+      }
+      await refreshLinkedWorkspaces();
+      await precheck({ preserveViews: true });
+    } catch {}
+  }
+  await refreshAccountAndWorkspaces();
+
+  // Populate linked workspaces list
+  async function refreshLinkedWorkspaces() {
+    const list = document.getElementById('linkedWorkspaces');
+    if (!list) return;
+    list.innerHTML = '';
+    try {
+      const base = (backendInput?.value || 'http://localhost:3000').replace(/\/$/, '');
+      const res = await fetch(`${base}/api/notion/workspaces`, { credentials: 'include' });
+      if (!res.ok) { list.innerHTML = '<li style="color:#999">No workspaces (not logged in)</li>'; return; }
+      const data = await res.json();
+      const workspaces = Array.isArray(data.workspaces) ? data.workspaces : [];
+      if (!workspaces.length) { list.innerHTML = '<li style="color:#999">No workspaces linked</li>'; return; }
+      for (const w of workspaces) {
+        const li = document.createElement('li');
+        li.style.display = 'flex'; li.style.alignItems = 'center'; li.style.gap = '14px'; li.style.marginBottom = '8px';
+        const span = document.createElement('span');
+        const acct = w.account_email || w.account_name ? ` — ${w.account_name || w.account_email}` : '';
+        span.textContent = `${w.workspace_name || 'Untitled'}${acct}`;
+        if (w.account_email) span.title = w.account_email;
+        const btn = document.createElement('button');
+        btn.className = 'btn btn-outline'; btn.textContent = 'Disconnect';
+        btn.addEventListener('click', async () => {
+          const ok = confirm('Disconnect this workspace?');
+          if (!ok) return;
+          const r = await fetch(`${base}/api/notion/connection?workspace_id=${encodeURIComponent(w.workspace_id)}`, { method: 'DELETE', credentials: 'include' });
+          if (r.ok) { await setStorage({ workspaceTokens: {} }); await refreshLinkedWorkspaces(); await precheck({ preserveViews: true }); }
+        });
+        li.appendChild(span); li.appendChild(btn);
+        list.appendChild(li);
+      }
+    } catch { list.innerHTML = '<li style="color:#999">Failed to load</li>'; }
+  }
+  await refreshLinkedWorkspaces();
 
   // Populate model selector based on available keys
   const options = [];
@@ -279,11 +353,54 @@ function orderDatabasesByRecentUsage(list, recentSaves, lastDatabaseId) {
 
 async function loadDatabases() {
   console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Loading databases…`);
-  const [list, stored] = await Promise.all([
-    listDatabases(''),
-    getStorage(['recentSaves', 'lastDatabaseId'])
-  ]);
-  dbList = Array.isArray(list) ? list.slice() : [];
+  const stored = await getStorage(['recentSaves', 'lastDatabaseId', 'backendUrl', 'workspaceTokens']);
+  const backendBase = (stored.backendUrl || 'http://localhost:3000').replace(/\/$/, '');
+  let tokensMap = stored.workspaceTokens && typeof stored.workspaceTokens === 'object' ? stored.workspaceTokens : {};
+  if (!Object.keys(tokensMap).length) {
+    try {
+      const res = await fetch(`${backendBase}/api/notion/workspaces`, { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        const list = Array.isArray(data.workspaces) ? data.workspaces : [];
+        const entries = await Promise.all(list.map(async (w) => {
+          try {
+            const r = await fetch(`${backendBase}/api/notion/token?workspace_id=${encodeURIComponent(w.workspace_id)}`, { credentials: 'include' });
+            if (!r.ok) throw new Error('token');
+            const j = await r.json();
+            return [w.workspace_id, j.access_token];
+          } catch { return null; }
+        }));
+        tokensMap = entries.filter(Boolean).reduce((acc, [id, tok]) => { acc[id] = tok; return acc; }, {});
+        if (Object.keys(tokensMap).length) await setStorage({ workspaceTokens: tokensMap });
+      }
+    } catch {}
+  }
+
+  let merged = [];
+  const tokenValues = Object.values(tokensMap);
+  if (!tokenValues.length) {
+    merged = await listDatabases('');
+  } else {
+    const perWorkspace = await Promise.all(tokenValues.map(async (tok) => {
+      try {
+        const body = { query: '', filter: { property: 'object', value: 'database' }, sort: { direction: 'ascending', timestamp: 'last_edited_time' } };
+        const resp = await fetch('https://api.notion.com/v1/search', { method: 'POST', headers: { 'Authorization': `Bearer ${tok}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        if (!resp.ok) throw new Error('notion');
+        const data = await resp.json();
+        const results = (data.results || []).map((item) => {
+          const title = (item.title || []).map((t) => t.plain_text).join('') || '(Sin título)';
+          const iconEmoji = item?.icon?.type === 'emoji' ? item.icon.emoji : undefined;
+          const url = item?.url || `https://www.notion.so/${String(item?.id || '').replace(/-/g, '')}`;
+          return { id: item.id, title, iconEmoji, url };
+        });
+        return results;
+      } catch { return []; }
+    }));
+    const byId = new Map();
+    for (const list of perWorkspace) { for (const db of list) { if (!byId.has(db.id)) byId.set(db.id, db); } }
+    merged = Array.from(byId.values());
+  }
+  dbList = Array.isArray(merged) ? merged.slice() : [];
   // Order by recent usage; boost lastDatabaseId
   dbList = orderDatabasesByRecentUsage(dbList, stored.recentSaves || [], stored.lastDatabaseId || '');
   dbFiltered = dbList.slice();
@@ -296,6 +413,15 @@ async function loadDatabases() {
   if (!pre) {
     try { const { label } = getDbElements(); if (label) label.textContent = 'Select database...'; } catch {}
   }
+  // Reveal dependent UI only after databases are ready
+  try {
+    const noteRow = document.getElementById('noteRow');
+    const customSaveRow = document.getElementById('customSaveRow');
+    const saveRow = document.getElementById('saveRow');
+    if (noteRow) noteRow.style.display = 'none'; // start collapsed by default
+    if (customSaveRow) customSaveRow.style.display = 'block';
+    if (saveRow) saveRow.style.display = 'flex';
+  } catch {}
   console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Databases loaded:`, dbList.length);
 }
 
@@ -397,11 +523,16 @@ async function main() {
   const tokensView = document.getElementById('tokensView');
   const tokensBack = document.getElementById('tokensBack');
   const tokensSave = document.getElementById('tokensSave');
-  const tokensOpenOptions = document.getElementById('tokensOpenOptions');
+  const startNotionOAuth = null; // removed explicit button; login flow chains to connect
+  const startNotionLogin = document.getElementById('startNotionLogin');
+  const fetchTokenFromBackend = document.getElementById('fetchTokenFromBackend');
   const tokensStatus = document.getElementById('tokensStatus');
   const tModel = document.getElementById('tModel');
   const appView = document.getElementById('app');
+  const tokensClear = document.getElementById('tokensClear');
   const dbSettingsView = document.getElementById('dbSettingsView');
+  // Track the last visible view to return from history
+  let lastView = 'app';
   const openDbSettings = document.getElementById('openDbSettings');
   const dbsBack = document.getElementById('dbsBack');
   const dbsSave = document.getElementById('dbsSave');
@@ -424,22 +555,168 @@ async function main() {
       await loadDatabases();
     }
   });
-  if (tokensOpenOptions) tokensOpenOptions.addEventListener('click', () => chrome.runtime.openOptionsPage());
+  if (tokensClear) tokensClear.addEventListener('click', async () => {
+    try {
+      await setStorage({
+        notionToken: '',
+        workspaceTokens: {},
+        workspaceId: '',
+        openaiKey: '',
+        googleApiKey: '',
+        llmProvider: 'openai',
+        llmModel: 'gpt-5-nano',
+        databaseSettings: {},
+        databasePrompts: {},
+        recentSaves: [],
+        lastDatabaseId: ''
+      });
+      tokensStatus.textContent = 'Local data cleared ✓';
+      tokensStatus.classList.add('success');
+      await precheck({ preserveViews: true });
+      needsReloadDatabases = true;
+    } catch (e) {
+      tokensStatus.textContent = 'Failed to clear';
+    }
+  });
   if (tokensSave) tokensSave.addEventListener('click', async () => {
     tokensStatus.textContent = '';
     tokensStatus.classList.remove('success');
     const notionToken = document.getElementById('tNotionToken').value.trim();
     const openaiKey = document.getElementById('tOpenAI').value.trim();
     const googleApiKey = document.getElementById('tGoogle').value.trim();
+    const backendUrl = document.getElementById('tBackendUrl').value.trim();
+    const workspaceId = document.getElementById('tWorkspaceId').value.trim();
     const [provider, ...rest] = String(tModel?.value || 'openai:gpt-5-nano').split(':');
     const llmProvider = provider || 'openai';
     const llmModel = rest.join(':') || 'gpt-5-nano';
-    await setStorage({ notionToken, openaiKey, googleApiKey, llmProvider, llmModel });
+    await setStorage({ notionToken, openaiKey, googleApiKey, llmProvider, llmModel, backendUrl, workspaceId });
     tokensStatus.textContent = 'Saved ✓';
     tokensStatus.classList.add('success');
     await precheck({ preserveViews: true });
     needsReloadDatabases = true;
   });
+
+  async function ensureLoggedIn(base) {
+    try {
+      const res = await fetch(`${base}/api/notion/workspaces`, { credentials: 'include' });
+      return res.status !== 401;
+    } catch { return false; }
+  }
+
+  // no-op: connect step is chained after login callback
+
+  if (startNotionLogin) startNotionLogin.addEventListener('click', async () => {
+    const { backendUrl } = await getStorage(['backendUrl']);
+    const base = backendUrl || 'http://localhost:3000';
+    const url = String(base).replace(/\/$/, '') + '/api/auth/notion/start';
+    try {
+      // Create the auth tab
+      const tab = await chrome.tabs.create({ url, active: true });
+      // Poll the session endpoint if Supabase redirects with access_token in URL.
+      const poll = setInterval(async () => {
+        try {
+          const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+          const current = tabs && tabs[0];
+          if (!current || !current.url) return;
+          if (current.url.includes('/auth/callback') && current.url.includes('access_token=')) {
+            try {
+              const u = new URL(current.url);
+              const access_token = u.searchParams.get('access_token');
+              if (access_token) {
+                await fetch(`${base.replace(/\/$/, '')}/api/auth/session`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ access_token }), credentials: 'include' });
+                await refreshAccountAndWorkspaces();
+              }
+            } catch {}
+          }
+        } catch {}
+      }, 1000);
+      setTimeout(() => clearInterval(poll), 20000);
+    } catch {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
+  });
+
+  if (connectWorkspaceBtn) connectWorkspaceBtn.addEventListener('click', async () => {
+    console.log('[NotionMagicClipper][Popup] Connect another workspace clicked');
+    const { backendUrl } = await getStorage(['backendUrl']);
+    const base = (backendUrl || 'http://localhost:3000').replace(/\/$/, '');
+    const startUrl = base + '/api/notion/start';
+    try { await chrome.tabs.create({ url: startUrl, active: true }); }
+    catch { window.open(startUrl, '_blank', 'noopener,noreferrer'); }
+  });
+
+  // Toggle extra context
+  const toggleNoteBtn = document.getElementById('toggleNoteBtn');
+  if (toggleNoteBtn) toggleNoteBtn.addEventListener('click', () => {
+    const noteRow = document.getElementById('noteRow');
+    if (!noteRow) return;
+    const shown = getComputedStyle(noteRow).display !== 'none';
+    noteRow.style.display = shown ? 'none' : 'block';
+  });
+
+  if (logoutBtn) logoutBtn.addEventListener('click', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      console.log('[NotionMagicClipper][Popup] Logout clicked');
+      const { backendUrl } = await getStorage(['backendUrl']);
+      const base = (backendUrl || 'http://localhost:3000').replace(/\/$/, '');
+      const resp = await fetch(`${base}/api/auth/logout`, { method: 'POST', credentials: 'include' });
+      console.log('[NotionMagicClipper][Popup] Logout response', resp.status);
+      await setStorage({ workspaceTokens: {}, notionToken: '' });
+      if (accountInfo) accountInfo.textContent = 'Not logged in';
+      logoutBtn.style.display = 'none';
+      tokensStatus.textContent = 'Logged out';
+      const list = document.getElementById('linkedWorkspaces');
+      if (list) list.innerHTML = '<li style="color:#999">No workspaces (not logged in)</li>';
+      if (connectWorkspaceBtn) connectWorkspaceBtn.style.display = 'none';
+      if (startNotionLogin) startNotionLogin.style.display = 'inline-flex';
+      await refreshAccountAndWorkspaces();
+    } catch {}
+  });
+
+  async function handleFetchTokenFromBackend() {
+    console.log('[NotionMagicClipper][Popup] Fetch from backend clicked');
+    if (tokensStatus) tokensStatus.textContent = 'Fetching token from backend…';
+    const { backendUrl } = await getStorage(['backendUrl']);
+    let wsId = (document.getElementById('tWorkspaceId')?.value || '').trim();
+    const base = (backendUrl || 'http://localhost:3000').replace(/\/$/, '');
+    if (!wsId) {
+      try {
+        const tab = await getCurrentTab();
+        const u = new URL(tab?.url || '');
+        const fromTab = u.searchParams.get('workspace_id');
+        if (fromTab) {
+          wsId = fromTab;
+          const input = document.getElementById('tWorkspaceId');
+          if (input) input.value = wsId;
+          await setStorage({ workspaceId: wsId });
+        }
+      } catch {}
+    }
+    if (!wsId) { if (tokensStatus) tokensStatus.textContent = 'Enter workspace ID from the redirect URL (tip: open the /connected tab and click this again).'; return; }
+    const url = `${base}/api/notion/token?workspace_id=${encodeURIComponent(wsId)}`;
+    console.log('[NotionMagicClipper][Popup] Fetch URL:', url);
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10000);
+      const resp = await fetch(url, { method: 'GET', signal: controller.signal });
+      clearTimeout(timeout);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const json = await resp.json();
+      if (!json?.access_token) throw new Error('Token not found for this workspace');
+      document.getElementById('tNotionToken').value = json.access_token;
+      await setStorage({ notionToken: json.access_token, workspaceId: wsId });
+      if (tokensStatus) { tokensStatus.textContent = 'Fetched from backend ✓'; tokensStatus.classList.add('success'); }
+      await precheck({ preserveViews: true });
+      needsReloadDatabases = true;
+    } catch (e) {
+      console.error('[NotionMagicClipper][Popup] Fetch from backend failed', e);
+      if (tokensStatus) tokensStatus.textContent = `Fetch failed: ${String(e?.message || e)}`;
+    }
+  }
+  if (fetchTokenFromBackend) fetchTokenFromBackend.addEventListener('click', handleFetchTokenFromBackend);
+  try { window.fetchFromBackend = handleFetchTokenFromBackend; } catch {}
 
   // Database settings mini-page
   function updateCustomizeVisibility() {
@@ -504,6 +781,12 @@ async function main() {
   const historyStatus = document.getElementById('historyStatus');
   const backBtn = document.getElementById('backToMain');
   const clearBtn = document.getElementById('clearHistory');
+  // Untitled databases view
+  const openUntitledBtn = document.getElementById('openUntitled');
+  const untitledView = document.getElementById('untitledView');
+  const untitledList = document.getElementById('untitledList');
+  const untitledStatus = document.getElementById('untitledStatus');
+  const untitledBack = document.getElementById('untitledBack');
 
   async function loadHistory() {
     historyStatus.textContent = '';
@@ -544,13 +827,83 @@ async function main() {
   }
 
   openHistoryBtn.addEventListener('click', async () => {
-    appView.style.display = 'none';
+    // Determine which view is currently visible
+    try {
+      const appVisible = getComputedStyle(appView).display !== 'none';
+      const tokensVisible = getComputedStyle(tokensView).display !== 'none';
+      const dbSettingsVisible = getComputedStyle(dbSettingsView).display !== 'none';
+      if (tokensVisible) lastView = 'tokens';
+      else if (dbSettingsVisible) lastView = 'dbSettings';
+      else lastView = 'app';
+    } catch {
+      if (tokensView && tokensView.style.display !== 'none') lastView = 'tokens';
+      else if (dbSettingsView && dbSettingsView.style.display !== 'none') lastView = 'dbSettings';
+      else lastView = 'app';
+    }
+
+    // Hide all other views and show history
+    if (appView) appView.style.display = 'none';
+    if (tokensView) tokensView.style.display = 'none';
+    if (dbSettingsView) dbSettingsView.style.display = 'none';
     historyView.style.display = 'block';
     await loadHistory();
   });
   backBtn.addEventListener('click', () => {
     historyView.style.display = 'none';
-    appView.style.display = 'block';
+    if (lastView === 'tokens') tokensView.style.display = 'block';
+    else if (lastView === 'dbSettings') dbSettingsView.style.display = 'block';
+    else appView.style.display = 'block';
+  });
+
+  async function loadUntitled() {
+    untitledStatus.textContent = 'Searching untitled databases...';
+    untitledList.innerHTML = '';
+    try {
+      let items = [];
+      try {
+        const res = await chrome.runtime.sendMessage({ type: 'LIST_UNTITLED_DATABASES' });
+        if (!res?.ok) throw new Error(res?.error || 'Search error (background)');
+        items = res.databases || [];
+      } catch (err) {
+        // Fallback: query Notion directly via Options helper if background fails
+        items = [];
+      }
+      untitledStatus.textContent = `Found ${items.length} untitled databases`;
+      for (const db of items) {
+        const li = document.createElement('li');
+        const a = document.createElement('a');
+        a.href = db.url || `https://www.notion.so/${String(db.id || '').replace(/-/g, '')}`;
+        a.textContent = db.title ? `${db.title}` : `${db.id}`;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        li.appendChild(a);
+        untitledList.appendChild(li);
+      }
+    } catch (e) {
+      untitledStatus.textContent = String(e?.message || e);
+    }
+  }
+
+  if (openUntitledBtn) openUntitledBtn.addEventListener('click', async () => {
+    try {
+      const appVisible = getComputedStyle(appView).display !== 'none';
+      const tokensVisible = getComputedStyle(tokensView).display !== 'none';
+      const dbSettingsVisible = getComputedStyle(dbSettingsView).display !== 'none';
+      if (tokensVisible) lastView = 'tokens';
+      else if (dbSettingsVisible) lastView = 'dbSettings';
+      else lastView = 'app';
+    } catch { lastView = 'app'; }
+    if (appView) appView.style.display = 'none';
+    if (tokensView) tokensView.style.display = 'none';
+    if (dbSettingsView) dbSettingsView.style.display = 'none';
+    untitledView.style.display = 'block';
+    await loadUntitled();
+  });
+  if (untitledBack) untitledBack.addEventListener('click', () => {
+    untitledView.style.display = 'none';
+    if (lastView === 'tokens') tokensView.style.display = 'block';
+    else if (lastView === 'dbSettings') dbSettingsView.style.display = 'block';
+    else appView.style.display = 'block';
   });
   clearBtn.addEventListener('click', async () => {
     await setStorage({ recentSaves: [] });

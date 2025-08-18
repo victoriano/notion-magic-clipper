@@ -1,0 +1,8 @@
+$ next dev
+ ⚠ Port 3000 is in use, trying 3001 instead.
+  ▲ Next.js 14.2.6
+  - Local:        http://localhost:3001
+  - Environments: .en ✓ Compiled /api/notion/workspaces in 164ms ([?25h
+ules)
+ GET /api/notion/workspaces 401 in 237ms
+[?25h
