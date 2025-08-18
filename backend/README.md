@@ -2,6 +2,8 @@
 
 Simple Next.js backend to handle Notion OAuth and store tokens in Supabase.
 
+Production URL: https://magic-clipper.vercel.app
+
 ## Setup
 
 1. Copy env file and fill values:
@@ -10,9 +12,9 @@ Simple Next.js backend to handle Notion OAuth and store tokens in Supabase.
 cp .env.example .env.local
 ```
 
-- `NEXT_PUBLIC_BASE_URL`: Origin allowed to receive final redirect (e.g., extension UI or website)
+- `NEXT_PUBLIC_BASE_URL`: Origin allowed to receive final redirect (e.g., extension UI or website). In production use `https://magic-clipper.vercel.app`.
 - `NOTION_CLIENT_ID` and `NOTION_CLIENT_SECRET`: From your Notion integration
-- `NOTION_REDIRECT_URI`: Must match the OAuth redirect URL configured in Notion (e.g., http://localhost:3000/api/notion/callback)
+- `NOTION_REDIRECT_URI`: Must match the OAuth redirect URL configured in Notion (e.g., http://localhost:3000/api/notion/callback). In production use `https://magic-clipper.vercel.app/api/notion/callback`.
 - `SUPABASE_URL` and `SUPABASE_ANON_KEY`: From your Supabase project
 
 2. Create tables in Supabase:
