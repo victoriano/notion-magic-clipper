@@ -158,6 +158,14 @@
           <button id="clearHistory" class="btn btn-outline" style="width:auto">Clear</button>
         </div>
       </div>
+      <div id="untitledView" style="display:none">
+        <h3 class="title">Untitled databases</h3>
+        <div id="untitledStatus"></div>
+        <ul id="untitledList"></ul>
+        <div class="row" style="margin-top:8px">
+          <button id="untitledBack" class="btn">← Back</button>
+        </div>
+      </div>
       <div id="tokensView" style="display:none">
         <h3 class="title">Tokens</h3>
         <div id="accountRow" class="row" style="margin:8px 0; justify-content: space-between">
@@ -212,6 +220,15 @@
         <small>Pick the model to use. Make sure the corresponding API key is configured above.</small>
         <hr class="divider" />
         <div class="row" style="margin-top:8px">
+          <button id="openUntitled" class="btn btn-ghost" style="width:auto; display:inline-flex; align-items:center; gap:6px">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width:18px;height:18px">
+              <circle cx="11" cy="11" r="8"/>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+            List untitled databases
+          </button>
+        </div>
+        <div class="row" style="margin-top:6px">
           <button id="openHistory" class="btn btn-ghost" style="width:auto; display:inline-flex; align-items:center; gap:6px">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width:18px;height:18px">
               <path d="M3 3v5h5"/>
@@ -227,9 +244,7 @@
           <button id="tokensClear" class="btn btn-outline" style="width:auto" title="Temporarily for testing">Clear local data</button>
         </div>
         <div id="tokensStatus"></div>
-        <div style="margin-top:12px">
-          <small>Want more settings? Open the <span id="tokensOpenOptions" class="link">full Options</span>.</small>
-        </div>
+        
       </div>
       <div id="dbSettingsView" style="display:none">
         <h3 class="title">Database settings</h3>

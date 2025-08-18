@@ -817,9 +817,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     if (message?.type === 'LIST_UNTITLED_DATABASES') {
       try {
-        const { notionToken } = await getConfig();
-        if (!notionToken) throw new Error('Missing Notion token. Configure it.');
-        const list = await searchUntitledDatabases(notionToken);
+        const { workspaceTokens, notionToken } = await getConfig();
+        const tokensMap = workspaceTokens && typeof workspaceTokens === 'object' ? workspaceTokens : {};
+        const tokenValues = Object.values(tokensMap);
+        let list = [];
+        if (tokenValues.length === 0) {
+          if (!notionToken) throw new Error('Missing Notion token. Configure it.');
+          list = await searchUntitledDatabases(notionToken);
+        } else {
+          const per = await Promise.all(tokenValues.map(async (tok) => {
+            try { return await searchUntitledDatabases(tok); } catch { return []; }
+          }));
+          const byId = new Map();
+          for (const arr of per) { for (const db of arr) { if (!byId.has(db.id)) byId.set(db.id, db); } }
+          list = Array.from(byId.values());
+        }
         sendResponse({ ok: true, databases: list });
       } catch (e) {
         sendResponse({ ok: false, error: String(e.message || e) });

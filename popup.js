@@ -524,7 +524,6 @@ async function main() {
   const startNotionOAuth = null; // removed explicit button; login flow chains to connect
   const startNotionLogin = document.getElementById('startNotionLogin');
   const fetchTokenFromBackend = document.getElementById('fetchTokenFromBackend');
-  const tokensOpenOptions = document.getElementById('tokensOpenOptions');
   const tokensStatus = document.getElementById('tokensStatus');
   const tModel = document.getElementById('tModel');
   const appView = document.getElementById('app');
@@ -554,7 +553,6 @@ async function main() {
       await loadDatabases();
     }
   });
-  if (tokensOpenOptions) tokensOpenOptions.addEventListener('click', () => chrome.runtime.openOptionsPage());
   if (tokensClear) tokensClear.addEventListener('click', async () => {
     try {
       await setStorage({
@@ -781,6 +779,12 @@ async function main() {
   const historyStatus = document.getElementById('historyStatus');
   const backBtn = document.getElementById('backToMain');
   const clearBtn = document.getElementById('clearHistory');
+  // Untitled databases view
+  const openUntitledBtn = document.getElementById('openUntitled');
+  const untitledView = document.getElementById('untitledView');
+  const untitledList = document.getElementById('untitledList');
+  const untitledStatus = document.getElementById('untitledStatus');
+  const untitledBack = document.getElementById('untitledBack');
 
   async function loadHistory() {
     historyStatus.textContent = '';
@@ -844,6 +848,57 @@ async function main() {
   });
   backBtn.addEventListener('click', () => {
     historyView.style.display = 'none';
+    if (lastView === 'tokens') tokensView.style.display = 'block';
+    else if (lastView === 'dbSettings') dbSettingsView.style.display = 'block';
+    else appView.style.display = 'block';
+  });
+
+  async function loadUntitled() {
+    untitledStatus.textContent = 'Searching untitled databases...';
+    untitledList.innerHTML = '';
+    try {
+      let items = [];
+      try {
+        const res = await chrome.runtime.sendMessage({ type: 'LIST_UNTITLED_DATABASES' });
+        if (!res?.ok) throw new Error(res?.error || 'Search error (background)');
+        items = res.databases || [];
+      } catch (err) {
+        // Fallback: query Notion directly via Options helper if background fails
+        items = [];
+      }
+      untitledStatus.textContent = `Found ${items.length} untitled databases`;
+      for (const db of items) {
+        const li = document.createElement('li');
+        const a = document.createElement('a');
+        a.href = db.url || `https://www.notion.so/${String(db.id || '').replace(/-/g, '')}`;
+        a.textContent = db.title ? `${db.title}` : `${db.id}`;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        li.appendChild(a);
+        untitledList.appendChild(li);
+      }
+    } catch (e) {
+      untitledStatus.textContent = String(e?.message || e);
+    }
+  }
+
+  if (openUntitledBtn) openUntitledBtn.addEventListener('click', async () => {
+    try {
+      const appVisible = getComputedStyle(appView).display !== 'none';
+      const tokensVisible = getComputedStyle(tokensView).display !== 'none';
+      const dbSettingsVisible = getComputedStyle(dbSettingsView).display !== 'none';
+      if (tokensVisible) lastView = 'tokens';
+      else if (dbSettingsVisible) lastView = 'dbSettings';
+      else lastView = 'app';
+    } catch { lastView = 'app'; }
+    if (appView) appView.style.display = 'none';
+    if (tokensView) tokensView.style.display = 'none';
+    if (dbSettingsView) dbSettingsView.style.display = 'none';
+    untitledView.style.display = 'block';
+    await loadUntitled();
+  });
+  if (untitledBack) untitledBack.addEventListener('click', () => {
+    untitledView.style.display = 'none';
     if (lastView === 'tokens') tokensView.style.display = 'block';
     else if (lastView === 'dbSettings') dbSettingsView.style.display = 'block';
     else appView.style.display = 'block';
