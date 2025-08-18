@@ -92,9 +92,9 @@ function setSelectedDb(id) {
     if (el.dataset.id === dbSelectedId) el.setAttribute('aria-selected', 'true');
     else el.removeAttribute('aria-selected');
   });
-  // update settings link label
-  const openBtn = document.getElementById('openDbSettings');
-  if (openBtn) openBtn.textContent = 'Custom save format';
+  // update settings link label without destroying icon
+  const openBtnLabel = document.getElementById('openDbSettingsLabel');
+  if (openBtnLabel) openBtnLabel.textContent = 'Custom save format';
 }
 
 function filterDbList(term) {
@@ -411,6 +411,15 @@ async function loadDatabases() {
   if (!pre) {
     try { const { label } = getDbElements(); if (label) label.textContent = 'Select database...'; } catch {}
   }
+  // Reveal dependent UI only after databases are ready
+  try {
+    const noteRow = document.getElementById('noteRow');
+    const customSaveRow = document.getElementById('customSaveRow');
+    const saveRow = document.getElementById('saveRow');
+    if (noteRow) noteRow.style.display = 'none'; // start collapsed by default
+    if (customSaveRow) customSaveRow.style.display = 'block';
+    if (saveRow) saveRow.style.display = 'flex';
+  } catch {}
   console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Databases loaded:`, dbList.length);
 }
 
@@ -521,6 +530,8 @@ async function main() {
   const appView = document.getElementById('app');
   const tokensClear = document.getElementById('tokensClear');
   const dbSettingsView = document.getElementById('dbSettingsView');
+  // Track the last visible view to return from history
+  let lastView = 'app';
   const openDbSettings = document.getElementById('openDbSettings');
   const dbsBack = document.getElementById('dbsBack');
   const dbsSave = document.getElementById('dbsSave');
@@ -632,6 +643,15 @@ async function main() {
     const startUrl = base + '/api/notion/start';
     try { await chrome.tabs.create({ url: startUrl, active: true }); }
     catch { window.open(startUrl, '_blank', 'noopener,noreferrer'); }
+  });
+
+  // Toggle extra context
+  const toggleNoteBtn = document.getElementById('toggleNoteBtn');
+  if (toggleNoteBtn) toggleNoteBtn.addEventListener('click', () => {
+    const noteRow = document.getElementById('noteRow');
+    if (!noteRow) return;
+    const shown = getComputedStyle(noteRow).display !== 'none';
+    noteRow.style.display = shown ? 'none' : 'block';
   });
 
   if (logoutBtn) logoutBtn.addEventListener('click', async (e) => {
@@ -801,13 +821,32 @@ async function main() {
   }
 
   openHistoryBtn.addEventListener('click', async () => {
-    appView.style.display = 'none';
+    // Determine which view is currently visible
+    try {
+      const appVisible = getComputedStyle(appView).display !== 'none';
+      const tokensVisible = getComputedStyle(tokensView).display !== 'none';
+      const dbSettingsVisible = getComputedStyle(dbSettingsView).display !== 'none';
+      if (tokensVisible) lastView = 'tokens';
+      else if (dbSettingsVisible) lastView = 'dbSettings';
+      else lastView = 'app';
+    } catch {
+      if (tokensView && tokensView.style.display !== 'none') lastView = 'tokens';
+      else if (dbSettingsView && dbSettingsView.style.display !== 'none') lastView = 'dbSettings';
+      else lastView = 'app';
+    }
+
+    // Hide all other views and show history
+    if (appView) appView.style.display = 'none';
+    if (tokensView) tokensView.style.display = 'none';
+    if (dbSettingsView) dbSettingsView.style.display = 'none';
     historyView.style.display = 'block';
     await loadHistory();
   });
   backBtn.addEventListener('click', () => {
     historyView.style.display = 'none';
-    appView.style.display = 'block';
+    if (lastView === 'tokens') tokensView.style.display = 'block';
+    else if (lastView === 'dbSettings') dbSettingsView.style.display = 'block';
+    else appView.style.display = 'block';
   });
   clearBtn.addEventListener('click', async () => {
     await setStorage({ recentSaves: [] });
