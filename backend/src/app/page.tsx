@@ -6,6 +6,10 @@ export default function HomePage() {
 			<p>
 				<a href="/api/notion/start" style={{ color: '#2563eb' }}>Connect Notion</a>
 			</p>
+			<hr style={{ margin: '16px 0' }} />
+			<p>
+				<a href="/privacy" style={{ color: '#2563eb' }}>Privacy policy</a>
+			</p>
 		</main>
 	);
 }
