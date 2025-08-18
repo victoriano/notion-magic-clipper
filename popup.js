@@ -154,6 +154,13 @@ async function precheck(opts = {}) {
   const app = document.getElementById('app');
   const indicator = document.getElementById('statusIndicator');
   const cfg = await getStorage(['notionToken', 'openaiKey', 'googleApiKey', 'llmProvider', 'llmModel', 'backendUrl', 'workspaceTokens']);
+  const defaultBackendBase = 'https://magic-clipper.vercel.app';
+  try {
+    if (!cfg.backendUrl || /^https?:\/\/localhost:3000\/?$/i.test(cfg.backendUrl)) {
+      await setStorage({ backendUrl: defaultBackendBase });
+      cfg.backendUrl = defaultBackendBase;
+    }
+  } catch {}
   const provider = cfg.llmProvider || 'openai';
   const model = cfg.llmModel || 'gpt-5-nano';
   const tokensMap = cfg.workspaceTokens && typeof cfg.workspaceTokens === 'object' ? cfg.workspaceTokens : {};
@@ -196,7 +203,7 @@ async function openTokensView() {
   if (notionInput) notionInput.value = notionToken || '';
   if (openaiInput) openaiInput.value = openaiKey || '';
   if (googleInput) googleInput.value = googleApiKey || '';
-  if (backendInput) backendInput.value = (backendUrl || 'http://localhost:3000');
+  if (backendInput) backendInput.value = (backendUrl || defaultBackendBase);
   if (workspaceInput) workspaceInput.value = workspaceId || '';
   // Hide backend + legacy token UI by default; show only if a dev flag is set
   const showAdvanced = /\bdev=1\b/i.test(location.search) || (await getStorage(['showAdvanced']))?.showAdvanced === true;
@@ -354,7 +361,7 @@ function orderDatabasesByRecentUsage(list, recentSaves, lastDatabaseId) {
 async function loadDatabases() {
   console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Loading databases…`);
   const stored = await getStorage(['recentSaves', 'lastDatabaseId', 'backendUrl', 'workspaceTokens']);
-  const backendBase = (stored.backendUrl || 'http://localhost:3000').replace(/\/$/, '');
+  const backendBase = (stored.backendUrl || defaultBackendBase).replace(/\/$/, '');
   let tokensMap = stored.workspaceTokens && typeof stored.workspaceTokens === 'object' ? stored.workspaceTokens : {};
   if (!Object.keys(tokensMap).length) {
     try {
@@ -607,7 +614,7 @@ async function main() {
 
   if (startNotionLogin) startNotionLogin.addEventListener('click', async () => {
     const { backendUrl } = await getStorage(['backendUrl']);
-    const base = backendUrl || 'http://localhost:3000';
+    const base = backendUrl || 'https://magic-clipper.vercel.app';
     const url = String(base).replace(/\/$/, '') + '/api/auth/notion/start';
     try {
       // Create the auth tab
@@ -639,7 +646,7 @@ async function main() {
   if (connectWorkspaceBtn) connectWorkspaceBtn.addEventListener('click', async () => {
     console.log('[NotionMagicClipper][Popup] Connect another workspace clicked');
     const { backendUrl } = await getStorage(['backendUrl']);
-    const base = (backendUrl || 'http://localhost:3000').replace(/\/$/, '');
+    const base = (backendUrl || 'https://magic-clipper.vercel.app').replace(/\/$/, '');
     const startUrl = base + '/api/notion/start';
     try { await chrome.tabs.create({ url: startUrl, active: true }); }
     catch { window.open(startUrl, '_blank', 'noopener,noreferrer'); }
@@ -660,7 +667,7 @@ async function main() {
     try {
       console.log('[NotionMagicClipper][Popup] Logout clicked');
       const { backendUrl } = await getStorage(['backendUrl']);
-      const base = (backendUrl || 'http://localhost:3000').replace(/\/$/, '');
+      const base = (backendUrl || 'https://magic-clipper.vercel.app').replace(/\/$/, '');
       const resp = await fetch(`${base}/api/auth/logout`, { method: 'POST', credentials: 'include' });
       console.log('[NotionMagicClipper][Popup] Logout response', resp.status);
       await setStorage({ workspaceTokens: {}, notionToken: '' });
@@ -680,7 +687,7 @@ async function main() {
     if (tokensStatus) tokensStatus.textContent = 'Fetching token from backend…';
     const { backendUrl } = await getStorage(['backendUrl']);
     let wsId = (document.getElementById('tWorkspaceId')?.value || '').trim();
-    const base = (backendUrl || 'http://localhost:3000').replace(/\/$/, '');
+    const base = (backendUrl || 'https://magic-clipper.vercel.app').replace(/\/$/, '');
     if (!wsId) {
       try {
         const tab = await getCurrentTab();
