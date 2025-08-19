@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Notion Magic Clipper",
   "version": "0.1.2",
-  "description": "Notion Magic Clipper: Save the current page into a Notion database and use GPT-5 Nano to auto-complete properties.",
+  "description": "Notion Magic Clipper: Clip the web to Notion with a bit of magic ✨",
   "permissions": [
     "storage",
     "activeTab",
