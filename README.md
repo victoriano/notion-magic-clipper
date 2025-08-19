@@ -1,5 +1,7 @@
 # Notion Magic Clipper
 
+👉 [Install from the Chrome Web Store](https://chromewebstore.google.com/detail/notion-magic-clipper/gohplijlpngkipjghachaaepbdlfabhk)
+
 [Follow on X: @NotionClipper](https://x.com/NotionClipper)
 
 <p align="center">
