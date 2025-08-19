@@ -5,7 +5,7 @@
 [Follow on X: @NotionClipper](https://x.com/NotionClipper)
 
 <p align="center">
-  <img src="icons/Clip Logo Chrome Blue.png" alt="Notion Magic Clipper logo" width="220" />
+  <img src="backend/public/logo.svg" alt="Notion Magic Clipper logo" width="220" />
   <br/>
   <em>Clip the web to Notion with a bit of magic ✨</em>
 </p>
