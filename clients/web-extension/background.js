@@ -860,17 +860,36 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const legacyPrompt = (databasePrompts || {})[databaseId] || '';
         const customInstructions = (settingsForDb.prompt ?? legacyPrompt) || '';
         const base = (backendUrl || 'https://magic-clipper.vercel.app').replace(/\/$/, '');
-        const resp = await fetch(`${base}/api/clip/save`, {
+        const url = `${base}/api/clip/save`;
+        const payload = { databaseId, pageContext, customInstructions, provider: llmProvider || 'openai', model: llmModel || 'gpt-5-nano' };
+        try {
+          const approxSize = (() => { try { return JSON.stringify(payload).length; } catch { return 0; }})();
+          dbgBg('BACKEND_REQUEST', { url, method: 'POST', approxPayloadBytes: approxSize });
+        } catch {}
+        const resp = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ databaseId, pageContext, customInstructions, provider: llmProvider || 'openai', model: llmModel || 'gpt-5-nano' })
+          body: JSON.stringify(payload)
         });
+        try {
+          dbgBg('BACKEND_RESPONSE_META', {
+            status: resp.status,
+            ok: resp.ok,
+            contentType: resp.headers.get('content-type') || '',
+            allow: resp.headers.get('allow') || '',
+            vary: resp.headers.get('vary') || ''
+          });
+        } catch {}
         if (!resp.ok) {
           const text = await resp.text().catch(() => '');
+          try { dbgBg('BACKEND_RESPONSE_BODY_ERR', text.slice(0, 2000)); } catch {}
           throw new Error(`Backend ${resp.status}: ${text}`);
         }
-        const json = await resp.json();
+        const json = await resp.json().catch(async () => {
+          const t = await resp.text().catch(() => '');
+          throw new Error(`Backend JSON parse failed. Body: ${t.slice(0, 500)}`);
+        });
         const page = json?.page;
         if (!page) throw new Error('No page returned');
         // Record minimal recent save entry
@@ -884,297 +903,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       return;
     }
-            const normalized = normalizeValueByType(def, raw);
-            if (normalized && typeof normalized === 'object' && Object.keys(normalized).length > 0) {
-              out[propName] = normalized;
-              // Remove stray flags on date
-              if (def.type === 'date' && out[propName]?.date && typeof out[propName].date === 'object') {
-                delete out[propName].date.time;
-                delete out[propName].date.allow_time;
-              }
-            }
-          }
 
-          return out;
-        }
-
-        let safeProps = sanitizeProperties(db, parsed.properties);
-        dbgBg('SAVE_TO_NOTION: sanitized properties', sanitizeForLog(safeProps));
-        // Ensure title property exists with a valid shape
-        const titlePropName = Object.entries(db.properties || {}).find(([, def]) => def.type === 'title')?.[0];
-        if (titlePropName) {
-          const existing = safeProps[titlePropName];
-          const hasValidTitle = Array.isArray(existing?.title) && existing.title.length > 0;
-          if (!hasValidTitle) {
-            safeProps[titlePropName] = {
-              title: [ { type: 'text', text: { content: pageContext.title || pageContext.meta?.['og:title'] || pageContext.url || 'Untitled' } } ]
-            };
-          }
-        }
-        let children = [];
-        if (effectiveSaveArticle) {
-          if (Array.isArray(pageContext.articleBlocks) && pageContext.articleBlocks.length) {
-            // Use deterministic article blocks built in the content script
-            children = sanitizeBlocks(pageContext.articleBlocks);
-          } else if (parsed && (parsed.children || parsed.blocks || parsed.content)) {
-            children = sanitizeBlocks(parsed.children || parsed.blocks || parsed.content || []);
-          }
-          // If DB requires content customization and we used article blocks, run a second pass to transform children
-          if (customizeContent && contentPrompt && typeof pageContext?.article?.html === 'string' && pageContext.article.html.length > 0) {
-            const htmlForTransform = pageContext.article.html;
-            dbgBg('SAVE_TO_NOTION: content customization starting', { articleHtmlLen: htmlForTransform.length, contentPromptLen: contentPrompt.length });
-            const transformMessages = [
-              { role: 'system', content: [
-                'You convert ARTICLE HTML into a JSON array of Notion blocks according to the user instructions.',
-                'Output rules:',
-                '- Return ONLY a raw JSON array (no wrapper object, no code fences). Do NOT ask questions or propose plans. Output the final array now.',
-                '- Allowed block types: paragraph, heading_1, heading_2, heading_3, bulleted_list_item, numbered_list_item, quote, image.',
-                '- For text blocks use simple rich_text with plain text only (no annotations).',
-                '- For image blocks use the external URL shape only.',
-                '- Do NOT include fields like object, id, children, created_time, annotations, etc.',
-                '- Keep the array to at most 100 blocks. Prefer a concise summary followed by the most important sections/images in reading order.',
-                'Examples:',
-                '[',
-                '  {"type":"heading_2","heading_2":{"rich_text":[{"type":"text","text":{"content":"Section title"}}]}},',
-                '  {"type":"paragraph","paragraph":{"rich_text":[{"type":"text","text":{"content":"One or two sentences explaining the section."}}]}},',
-                '  {"type":"bulleted_list_item","bulleted_list_item":{"rich_text":[{"type":"text","text":{"content":"Key point"}}]}},',
-                '  {"type":"numbered_list_item","numbered_list_item":{"rich_text":[{"type":"text","text":{"content":"Step 1"}}]}},',
-                '  {"type":"quote","quote":{"rich_text":[{"type":"text","text":{"content":"Quoted insight."}}]}},',
-                '  {"type":"image","image":{"external":{"url":"https://example.com/image.jpg"}}}',
-                ']'
-              ].join(' ') },
-              { role: 'user', content: `Article HTML:\n${htmlForTransform}` },
-              { role: 'user', content: `Transform instructions:\n${contentPrompt}` }
-            ];
-            try {
-              function safeParseJSON(s) { try { return JSON.parse(s); } catch { return null; } }
-              function buildTransformViewer(messages) {
-                return messages.map((m) => {
-                  if (typeof m?.content !== 'string') return m;
-                  const m1 = 'Article HTML:\n';
-                  const m2 = 'Transform instructions:\n';
-                  if (m.content.startsWith(m1)) {
-                    const htmlStr = m.content.slice(m1.length);
-                    return { role: m.role, articleHtmlLen: htmlStr.length, articleHtmlPreview: htmlStr.slice(0, 10000) };
-                  }
-                  if (m.content.startsWith(m2)) {
-                    const instr = m.content.slice(m2.length).trim().split(/\n+/).filter(Boolean);
-                    return { role: m.role, instructions: instr };
-                  }
-                  return { role: m.role, content_lines: m.content.split('\n') };
-                });
-              }
-              const cviewer = buildTransformViewer(transformMessages);
-              dbgBg('SAVE_TO_NOTION: content customization prompt (viewer json)', JSON.stringify(cviewer, null, 2));
-              if (!debugReport.customization) debugReport.customization = { used: true };
-              debugReport.customization.promptViewer = cviewer;
-            } catch {}
-            let replacedViaModel = false;
-            try {
-              const transformed = await llmChat(transformMessages, { provider: chosenProvider, model: chosenModel, reasoning_effort: openai_reasoning_effort || 'low', verbosity: openai_verbosity || 'low' });
-              try { dbgBg('SAVE_TO_NOTION: content customization raw', transformed.slice(0, 2000)); } catch {}
-              // Allow either a pure array or { children: [...] } shapes
-              const tTrim = typeof transformed === 'string' ? transformed.trim() : '';
-              let parsedTransformed = null;
-              if (tTrim.startsWith('[')) {
-                // Fast path for arrays
-                try { parsedTransformed = JSON.parse(tTrim); } catch {}
-              }
-              if (!parsedTransformed) parsedTransformed = extractJsonObject(transformed);
-              if (!parsedTransformed) {
-                try { parsedTransformed = JSON.parse(transformed); } catch {}
-              }
-              if (Array.isArray(parsedTransformed)) {
-                // ok
-              } else if (parsedTransformed && Array.isArray(parsedTransformed.children)) {
-                parsedTransformed = parsedTransformed.children;
-              } else {
-                // Try to recover from fenced JSON arrays
-                const fence = transformed.match(/```(?:json)?\n([\s\S]*?)\n```/i);
-                if (fence) {
-                  try {
-                    const arr = JSON.parse(fence[1]);
-                    if (Array.isArray(arr)) parsedTransformed = arr;
-                  } catch {}
-                }
-              }
-              try {
-                dbgBg('SAVE_TO_NOTION: content customization response (viewer json)', JSON.stringify(parsedTransformed, null, 2));
-                if (!debugReport.customization) debugReport.customization = { used: true };
-                debugReport.customization.responseViewer = parsedTransformed;
-              } catch {}
-              let safeTransformed = sanitizeBlocks(Array.isArray(parsedTransformed) ? parsedTransformed : []);
-              if (Array.isArray(safeTransformed) && safeTransformed.length) {
-                children = safeTransformed;
-                replacedViaModel = true;
-              }
-              // Retry once with a stricter repair prompt if we still have zero blocks and the model answered with prose
-              if (!replacedViaModel) {
-                const repairMessages = [
-                  { role: 'system', content: [
-                    'Your previous answer was not a JSON array of Notion blocks. Return ONLY a raw JSON array now, with at most 100 blocks.',
-                    'Allowed types: paragraph, heading_1, heading_2, heading_3, bulleted_list_item, numbered_list_item, quote, image.',
-                    'No wrapper object, no code fences, no explanation.'
-                  ].join(' ') },
-                  { role: 'user', content: `Article HTML (again):\n${htmlForTransform}` },
-                  { role: 'user', content: `Transform instructions (again):\n${contentPrompt}` }
-                ];
-                try {
-                  const repaired = await llmChat(repairMessages, { provider: chosenProvider, model: chosenModel, reasoning_effort: openai_reasoning_effort || 'low', verbosity: openai_verbosity || 'low' });
-                  let reparsed = null;
-                  const rTrim = typeof repaired === 'string' ? repaired.trim() : '';
-                  if (rTrim.startsWith('[')) { try { reparsed = JSON.parse(rTrim); } catch {} }
-                  if (!reparsed) reparsed = extractJsonObject(repaired);
-                  if (Array.isArray(reparsed)) {
-                    safeTransformed = sanitizeBlocks(reparsed);
-                    if (Array.isArray(safeTransformed) && safeTransformed.length) {
-                      children = safeTransformed;
-                      replacedViaModel = true;
-                    }
-                  }
-                  try { dbgBg('SAVE_TO_NOTION: customization repair raw', repaired.slice(0, 2000)); } catch {}
-                  try { dbgBg('SAVE_TO_NOTION: customization repair parsed (len)', Array.isArray(safeTransformed) ? safeTransformed.length : 0); } catch {}
-                } catch {}
-              }
-              try { dbgBg('SAVE_TO_NOTION: content customization parsed (first block)', Array.isArray(children) && children[0] ? sanitizeForLog(children[0]) : null); } catch {}
-              dbgBg('SAVE_TO_NOTION: content customization done', { outCount: children.length });
-              debugReport.customization = {
-                used: true,
-                transformMessages,
-                raw: typeof transformed === 'string' ? transformed.slice(0, 200000) : '',
-                outCount: children.length,
-                replacedViaModel
-              };
-            } catch (e) {
-              dbgBg('Content customization failed (using original article blocks)', String(e?.message || e));
-              debugReport.customization = { used: true, error: String(e?.message || e) };
-            }
-
-            // Fallback: if model returned no blocks, keep only images and add a short summary paragraph
-            if (!children || !Array.isArray(children) || children.length === 0 || (debugReport.customization && debugReport.customization.replacedViaModel === false)) {
-              const imageOnly = (Array.isArray(pageContext.articleBlocks) ? sanitizeBlocks(pageContext.articleBlocks) : children || [])
-                .filter((b) => b && b.type === 'image')
-                .slice(0, 8);
-              let summaryBlocks = [];
-              try {
-                const contextText = (pageContext.article?.text || pageContext.textSample || '').slice(0, 4000);
-                const summaryMessages = [
-                  { role: 'system', content: 'Return only a JSON array with a single Notion paragraph block that briefly explains why this insight matters now. Use neutral, concise language (1-2 sentences).' },
-                  { role: 'user', content: `Context:\n${contextText}` },
-                  { role: 'user', content: `Additional instructions for the paragraph:\n${contentPrompt}` }
-                ];
-                const resp = await llmChat(summaryMessages, { provider: chosenProvider, model: chosenModel, reasoning_effort: openai_reasoning_effort || 'low', verbosity: openai_verbosity || 'low' });
-                const parsedSummary = extractJsonObject(resp) || JSON.parse(resp);
-                const safeSummary = sanitizeBlocks(Array.isArray(parsedSummary) ? parsedSummary : (parsedSummary?.children || []));
-                if (Array.isArray(safeSummary) && safeSummary.length) summaryBlocks = safeSummary.slice(0, 1);
-              } catch {}
-              if (summaryBlocks.length === 0) {
-                summaryBlocks = [{ object: 'block', type: 'paragraph', paragraph: { rich_text: [{ type: 'text', text: { content: 'Summary unavailable.' } }] } }];
-              }
-              children = imageOnly.concat(summaryBlocks);
-              dbgBg('SAVE_TO_NOTION: customization fallback applied', { images: imageOnly.length, summary: summaryBlocks.length });
-              if (debugReport.customization) {
-                debugReport.customization.fallbackUsed = true;
-                debugReport.customization.fallbackImages = imageOnly.length;
-              }
-            }
-          }
-          // When article is disabled, we intentionally ignore any children returned by the model
-          // and do not synthesize blocks from textSample.
-        }
-
-        // Snapshot for debugging (easy to copy/paste)
-        const modelChildrenCount = parsed ? ((Array.isArray(parsed.children) && parsed.children.length) || (Array.isArray(parsed.blocks) && parsed.blocks.length) || (Array.isArray(parsed.content) && parsed.content.length) || 0) : 0;
-        const snapshot = {
-          databaseId,
-          pageUrl: pageContext.url || '',
-          promptMode,
-          saveArticleFlag,
-          effectiveSaveArticle,
-          customizeContent,
-          contentPromptLen: contentPrompt.length,
-          hasArticle: !!pageContext.article,
-          articleBlocks: Array.isArray(pageContext.articleBlocks) ? pageContext.articleBlocks.length : 0,
-          textSampleLen: typeof pageContext.textSample === 'string' ? pageContext.textSample.length : 0,
-          modelChildrenCount,
-          chosenChildren: Array.isArray(children) ? children.length : 0
-        };
-        dbgBg('SAVE_TO_NOTION: snapshot', snapshot);
-        dbgBg('SAVE_TO_NOTION: prepared children blocks', children.length, sanitizeForLog(children));
-        // Append uploaded images (from popup) as blocks
-        const attachmentBlocks = Array.isArray(message.attachments)
-          ? message.attachments
-              .filter((a) => typeof a?.file_upload_id === 'string')
-              .map((a) => ({ object: 'block', type: 'image', image: { file_upload: { id: (a.file_upload_id || a.id) } } }))
-          : [];
-        // Also try to map attachments into an image-like files property if present
-        if (Array.isArray(message.attachments) && message.attachments.length) {
-          const imageLike = /poster|cover|thumb|thumbnail|image|artwork|screenshot|photo|picture/i;
-          const filesPropName = Object.entries(db.properties || {})
-            .filter(([, def]) => def.type === 'files')
-            .map(([name]) => name)
-            .sort((a, b) => {
-              const ai = imageLike.test(a) ? 0 : 1;
-              const bi = imageLike.test(b) ? 0 : 1;
-              return ai - bi;
-            })[0];
-          if (filesPropName) {
-            const uploads = message.attachments
-              .filter((a) => typeof a?.file_upload_id === 'string')
-              .map((a) => ({ name: 'upload', file_upload: { id: (a.file_upload_id || a.id) } }));
-            if (uploads.length) {
-              const existing = safeProps[filesPropName]?.files || parsed.properties?.[filesPropName]?.files || [];
-              safeProps[filesPropName] = { files: existing.concat(uploads) };
-            }
-          }
-        }
-        // Ensure select options exist (auto-create missing ones)
-        await ensureSelectOptions(databaseId, safeProps, tokenForDb);
-        dbgBg('SAVE_TO_NOTION: ensured select options (props sent to check)', sanitizeForLog(safeProps));
-        // Do not prepend bookmark/note. Note becomes extra LLM context only.
-        const blocks = attachmentBlocks.concat(children);
-        // Materialize external image URLs into Notion-hosted uploads (both blocks and files properties)
-        await materializeExternalImagesInPropsAndBlocks(db, safeProps, blocks, { maxUploads: 6 });
-        // Ensure we do not send forbidden fields to Notion (e.g., file_upload.file_upload_id in blocks)
-        stripForbiddenFieldsFromBlocks(blocks);
-        // Prefer the start time from the popup for end-to-end duration; fallback to now
-        const t0 = typeof message.startedAt === 'number' ? message.startedAt : Date.now();
-        dbgBg('SAVE_TO_NOTION: creating page in Notion with', { properties: sanitizeForLog(safeProps), children: sanitizeForLog(blocks) });
-        // Notion limits initial children to 100; create page with up to 100, then append the rest
-        const firstBatch = blocks.slice(0, 100);
-        debugReport.finalChildrenCount = blocks.length;
-        try { debugReport.propertiesKeys = Object.keys(safeProps || {}); } catch {}
-        const created = await createPageInDatabase(databaseId, safeProps, firstBatch, tokenForDb);
-        const t1 = Date.now();
-        dbgBg('SAVE_TO_NOTION: page created', sanitizeForLog({ id: created?.id, url: created?.url || created?.public_url, properties: created?.properties }));
-        const pageUrl = created?.url || created?.public_url || '';
-        // Append remaining children batches in chunks of 100
-        const rest = blocks.slice(100);
-        const parentId = created?.id;
-        for (let i = 0; i < rest.length && parentId; i += 100) {
-          const chunk = rest.slice(i, i + 100);
-          try {
-            await appendChildrenBlocks(parentId, chunk, tokenForDb);
-            dbgBg('SAVE_TO_NOTION: appended children chunk', { offset: i, count: chunk.length });
-          } catch (e) {
-            dbgBg('SAVE_TO_NOTION: append failed', { offset: i, count: chunk.length, error: String(e?.message || e) });
-            break; // stop on first error to avoid partial spam
-          }
-        }
-        // Try to extract a final page title from properties
-        const titlePropNameFinal = Object.entries(db.properties || {}).find(([, def]) => def.type === 'title')?.[0];
-        const finalTitle = titlePropNameFinal && created?.properties?.[titlePropNameFinal]?.title
-          ? created.properties[titlePropNameFinal].title.map((t) => t?.plain_text || '').join('')
-          : undefined;
-        const dbTitle = Array.isArray(db?.title) ? db.title.map((t) => t.plain_text).join('') : '';
-        await recordRecentSave({ url: pageUrl, ts: Date.now(), databaseId, databaseTitle: dbTitle, title: finalTitle, sourceUrl: pageContext.url || '', durationMs: t1 - t0 });
-        const totalSeconds = ((Date.now() - t0) / 1000).toFixed(1);
-        dbgBg('SAVE_TO_NOTION: total time (s)', totalSeconds);
-        sendResponse({ ok: true, page: created });      } catch (e) {
-        sendResponse({ ok: false, error: String(e.message || e) });
-      }
-      return;
-    }
     // If we got here, no known message type matched. Respond to avoid channel timeout.
     try {
       sendResponse({ ok: false, error: `Tipo de mensaje no reconocido: ${message?.type || 'desconocido'}` });
