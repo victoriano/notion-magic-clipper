@@ -54,7 +54,8 @@ async function getConfig() {
         'llmProvider',
         'llmModel',
         'workspaceTokens',
-        'dbWorkspaceMap'
+        'dbWorkspaceMap',
+        'backendUrl'
       ],
       (res) => resolve(res)
     );
@@ -772,36 +773,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === 'LIST_DATABASES') {
       try {
         dbgBg('LIST_DATABASES: query =', message.query);
-        const { notionSearchQuery, workspaceTokens } = await getConfig();
-        const tokensMap = workspaceTokens && typeof workspaceTokens === 'object' ? workspaceTokens : {};
-        const tokenValues = Object.values(tokensMap);
-        let bases = [];
-        if (tokenValues.length === 0) {
-          bases = await listDatabases(message.query ?? notionSearchQuery ?? '');
-        } else {
-          const body = { query: message.query ?? notionSearchQuery ?? '', filter: { property: 'object', value: 'database' }, sort: { direction: 'ascending', timestamp: 'last_edited_time' } };
-          const per = await Promise.all(tokenValues.map(async (tok) => {
-            try {
-              const data = await notionFetch('/search', { method: 'POST', body: JSON.stringify(body) }, tok);
-              const results = (data.results || []).map((item) => {
-                const title = (item.title || []).map((t) => t.plain_text).join('') || '(Sin título)';
-                const iconEmoji = item?.icon?.type === 'emoji' ? item.icon.emoji : undefined;
-                const url = item?.url || `https://www.notion.so/${String(item?.id || '').replace(/-/g, '')}`;
-                return { id: item.id, title, iconEmoji, url };
-              });
-              return results;
-            } catch { return []; }
-          }));
-          const byId = new Map();
-          for (const list of per) { for (const db of list) { if (!byId.has(db.id)) byId.set(db.id, db); } }
-          bases = Array.from(byId.values());
-        }
-        // Persist a basic dbId->workspaceId map for later saves
+        const { backendUrl, notionSearchQuery } = await getConfig();
+        const base = (backendUrl || 'https://magic-clipper.vercel.app').replace(/\/$/, '');
+        const url = `${base}/api/databases/search?q=${encodeURIComponent(message.query ?? notionSearchQuery ?? '')}`;
+        const resp = await fetch(url, { credentials: 'include' });
+        if (!resp.ok) throw new Error(`Backend ${resp.status}`);
+        const data = await resp.json();
+        const bases = Array.isArray(data?.databases) ? data.databases : [];
         try {
           const map = {};
           if (Array.isArray(bases)) {
             for (const db of bases) {
-              // We can't infer workspaceId directly from /search; mark unknown
               map[db.id] = map[db.id] || null;
             }
           }
@@ -869,335 +851,39 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     if (message?.type === 'SAVE_TO_NOTION') {
       try {
-        const { databaseId, pageContext, note, saveArticle } = message;
+        const { databaseId, pageContext } = message;
         if (!databaseId) throw new Error('databaseId faltante');
         if (!pageContext) throw new Error('pageContext faltante');
         dbgBg('SAVE_TO_NOTION: start', { databaseId, url: pageContext?.url });
-        const debugReport = { t: new Date().toISOString(), databaseId, pageUrl: pageContext?.url || '' };
-        // Log Readability raw HTML (separately) for quick inspection
-        try {
-          const artHtml = pageContext?.article?.html || '';
-          if (typeof artHtml === 'string' && artHtml.length > 0) {
-            dbgBg('READABILITY_HTML: length', artHtml.length);
-            // Print the entire HTML in chunks for easy copy/paste (avoids console truncation)
-            try {
-              const chunkSize = 50000; // characters per chunk
-              const total = Math.ceil(artHtml.length / chunkSize) || 1;
-              dbgBg('READABILITY_HTML: chunks', { count: total, chunkSize });
-              for (let i = 0; i < total; i++) {
-                const start = i * chunkSize;
-                const end = Math.min(artHtml.length, start + chunkSize);
-                dbgBg(`READABILITY_HTML: chunk ${i + 1}/${total}`, artHtml.slice(start, end));
-              }
-            } catch {}
-            debugReport.readabilityHtmlLen = artHtml.length;
-            debugReport.readabilityHtmlSample = artHtml.slice(0, 20000);
-          }
-        } catch {}
-
-        const { workspaceTokens, dbWorkspaceMap } = await getConfig();
-        const tokensMap = workspaceTokens && typeof workspaceTokens === 'object' ? workspaceTokens : {};
-        const wsIdHint = dbWorkspaceMap && typeof dbWorkspaceMap === 'object' ? dbWorkspaceMap[databaseId] : null;
-        let tokenForDb = wsIdHint && tokensMap[wsIdHint] ? tokensMap[wsIdHint] : Object.values(tokensMap)[0];
-        let db;
-        // Probe tokens if needed to find one that can read this database
-        if (!tokenForDb) throw new Error('Missing Notion token. Configure it.');
-        try {
-          db = await getDatabase(databaseId, tokenForDb);
-        } catch (e) {
-          const tokens = Object.entries(tokensMap);
-          for (const [wsId, tok] of tokens) {
-            if (tok === tokenForDb) continue;
-            try {
-              db = await getDatabase(databaseId, tok);
-              tokenForDb = tok;
-              // Cache mapping for future saves
-              try { const prev = await getConfig(); const map = Object.assign({}, prev.dbWorkspaceMap || {}); map[databaseId] = wsId; await set({ dbWorkspaceMap: map }); } catch {}
-              break;
-            } catch {}
-          }
-          if (!db) throw e;
-        }
-        dbgBg('SAVE_TO_NOTION: fetched database schema');
-        const schemaForLLM = extractSchemaForPrompt(db);
-        dbgBg('SAVE_TO_NOTION: schemaForLLM', sanitizeForLog(schemaForLLM));
-        const { openai_reasoning_effort, openai_verbosity, databasePrompts, databaseSettings, llmProvider, llmModel } = await getConfig();
+        const { backendUrl, llmProvider, llmModel, databasePrompts, databaseSettings } = await getConfig();
         const settingsForDb = (databaseSettings || {})[databaseId] || {};
         const legacyPrompt = (databasePrompts || {})[databaseId] || '';
         const customInstructions = (settingsForDb.prompt ?? legacyPrompt) || '';
-        const saveArticleFlag = settingsForDb.saveArticle !== false; // default true per DB
-        const effectiveSaveArticle = (typeof saveArticle === 'boolean' ? saveArticle : saveArticleFlag);
-        const customizeContent = settingsForDb.customizeContent === true;
-        const contentPrompt = typeof settingsForDb.contentPrompt === 'string' ? settingsForDb.contentPrompt.trim() : '';
-        const chosenProvider = message.llmProvider || llmProvider || 'openai';
-        const chosenModel = message.llmModel || llmModel || (chosenProvider === 'google' ? 'gemini-2.5-flash' : GPT5_NANO_MODEL);
-        const promptMode = effectiveSaveArticle ? 'article+children' : 'properties-only';
-        dbgBg('SAVE_TO_NOTION: mode', { promptMode, chosenProvider, chosenModel });
-        debugReport.settings = {
-          promptMode,
-          saveArticleFlag,
-          effectiveSaveArticle,
-          customizeContent,
-          contentPromptLen: contentPrompt.length,
-          hasArticle: !!pageContext.article,
-          articleBlocks: Array.isArray(pageContext.articleBlocks) ? pageContext.articleBlocks.length : 0,
-          textSampleLen: typeof pageContext.textSample === 'string' ? pageContext.textSample.length : 0
-        };
-        const prompt = buildPromptForProperties(schemaForLLM, pageContext, customInstructions, { useArticle: effectiveSaveArticle });
-        dbgBg('SAVE_TO_NOTION: db settings', {
-          databaseId,
-          settingsForDb: sanitizeForLog(settingsForDb),
-          saveArticleMsg: typeof saveArticle === 'boolean' ? saveArticle : undefined,
-          saveArticleFlag,
-          effectiveSaveArticle,
-          articleBlocks: Array.isArray(pageContext.articleBlocks) ? pageContext.articleBlocks.length : 0,
-          hasArticle: !!pageContext.article
+        const base = (backendUrl || 'https://magic-clipper.vercel.app').replace(/\/$/, '');
+        const resp = await fetch(`${base}/api/clip/save`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ databaseId, pageContext, customInstructions, provider: llmProvider || 'openai', model: llmModel || 'gpt-5-nano' })
         });
-        dbgBg('SAVE_TO_NOTION: prompt (messages)', sanitizeForLog(prompt));
-        try {
-          dbgBg('SAVE_TO_NOTION: prompt (full object)', prompt);
-          // Also log a viewer-friendly JSON without \n escapes by structuring user content
-          function safeParseJSON(s) { try { return JSON.parse(s); } catch { return null; } }
-          function buildViewer(messages) {
-            return messages.map((m) => {
-              if (typeof m?.content !== 'string') return m;
-              const markerA = 'Database schema (properties):\n';
-              const markerB = '\n\nPage context:\n';
-              const markerC = '\n\nInstructions:';
-              const iA = m.content.indexOf(markerA);
-              const iB = m.content.indexOf(markerB);
-              const iC = m.content.indexOf(markerC);
-              if (iA >= 0 && iB > iA && iC > iB) {
-                const schemaStr = m.content.slice(iA + markerA.length, iB);
-                const ctxStr = m.content.slice(iB + markerB.length, iC);
-                const instrStr = m.content.slice(iC + markerC.length);
-                const schemaObj = safeParseJSON(schemaStr.trim());
-                const ctxObj = safeParseJSON(ctxStr.trim());
-                const instructions = instrStr.trim().split(/\n+/).map((s) => s.replace(/^[-•]\s*/, '').trim()).filter(Boolean);
-                return { role: m.role, content_view: { schema: schemaObj ?? schemaStr, pageContext: ctxObj ?? ctxStr, instructions } };
-              }
-              // Fallback: split content into lines to remove explicit \n sequences
-              return { role: m.role, content_lines: m.content.split('\n') };
-            });
-          }
-          const viewer = buildViewer(prompt);
-          dbgBg('SAVE_TO_NOTION: prompt (viewer json)', JSON.stringify(viewer, null, 2));
-          debugReport.promptMessagesViewer = viewer;
-        } catch (e) {
-          dbgBg('SAVE_TO_NOTION: prompt logging error', String(e?.message || e));
+        if (!resp.ok) {
+          const text = await resp.text().catch(() => '');
+          throw new Error(`Backend ${resp.status}: ${text}`);
         }
-        debugReport.promptMessages = prompt;
-
-        const content = await llmChat(prompt, {
-          provider: chosenProvider,
-          model: chosenModel,
-          reasoning_effort: openai_reasoning_effort || 'low',
-          verbosity: openai_verbosity || 'low'
-        });
-        dbgBg('SAVE_TO_NOTION: received LLM content');
-        debugReport.mainRaw = typeof content === 'string' ? content.slice(0, 200000) : '';
-
-        // Parse JSON block from content (robust extractor)
-        const parsed = extractJsonObject(content);
-        if (!parsed) {
-          throw new Error('The model did not return valid JSON for properties.');
-        }
-        dbgBg('SAVE_TO_NOTION: parsed JSON', sanitizeForLog(parsed));
+        const json = await resp.json();
+        const page = json?.page;
+        if (!page) throw new Error('No page returned');
+        // Record minimal recent save entry
         try {
-          dbgBg('SAVE_TO_NOTION: response (viewer json)', JSON.stringify(parsed, null, 2));
-          debugReport.mainParsedViewer = parsed;
+          const dbTitle = '';
+          await recordRecentSave({ url: page?.url || page?.public_url || '', ts: Date.now(), databaseId, databaseTitle: dbTitle, title: '', sourceUrl: pageContext.url || '' });
         } catch {}
-        try { debugReport.mainParsedChildrenCount = (Array.isArray(parsed?.children) ? parsed.children.length : (Array.isArray(parsed?.blocks) ? parsed.blocks.length : (Array.isArray(parsed?.content) ? parsed.content.length : 0))); } catch {}
-
-        if (!parsed || typeof parsed !== 'object' || !parsed.properties) {
-          throw new Error('Falta la clave "properties" en la salida del modelo.');
-        }
-
-        // Ensure a URL property is set if schema has one and model omitted it
-        const urlPropName = Object.entries(db.properties || {}).find(([, def]) => def.type === 'url')?.[0];
-        if (urlPropName && !parsed.properties[urlPropName] && pageContext.url) {
-          parsed.properties[urlPropName] = { url: pageContext.url };
-        }
-        dbgBg('SAVE_TO_NOTION: ensured URL property', urlPropName ? { [urlPropName]: parsed.properties[urlPropName] } : {});
-
-        // Sanitize and normalize properties to valid Notion API shapes
-        function sanitizeProperties(db, props) {
-          const out = {};
-          const schema = db.properties || {};
-
-          function toRichText(text) {
-            const content = typeof text === 'string' ? text : '';
-            return [{ type: 'text', text: { content } }];
-          }
-
-          function sanitizeRichTextArray(arr) {
-            const out = [];
-            const MAX = 20;
-            function make(text, linkUrl) {
-              const content = String(text || '').slice(0, 2000);
-              const base = { type: 'text', text: { content } };
-              if (linkUrl && typeof linkUrl === 'string') {
-                base.text.link = { url: linkUrl };
-              }
-              return base;
-            }
-            for (const it of Array.isArray(arr) ? arr : []) {
-              if (out.length >= MAX) break;
-              if (typeof it === 'string') { out.push(make(it)); continue; }
-              if (it && typeof it === 'object') {
-                // Accept both proper Notion shape and lenient LLM output missing type
-                if ((it.type === 'text' || it.type == null) && it.text && typeof it.text.content === 'string') {
-                  const linkUrl = it.text.link?.url || it.href || (typeof it.text.link === 'string' ? it.text.link : undefined);
-                  out.push(make(it.text.content, linkUrl));
-                  continue;
-                }
-                if (typeof it.plain_text === 'string') {
-                  out.push(make(it.plain_text, it.href));
-                  continue;
-                }
-                if (typeof it.content === 'string') {
-                  out.push(make(it.content));
-                  continue;
-                }
-              }
-            }
-            if (out.length === 0) out.push(make(''));
-            return out;
-          }
-
-          function guessNameFromUrl(u, fallback = 'file') {
-            try {
-              const url = new URL(u);
-              const base = url.pathname.split('/').pop();
-              if (base && base !== '/') return base;
-            } catch {}
-            return fallback;
-          }
-
-          function normalizeValueByType(def, value) {
-            const type = def.type;
-            if (value == null) return undefined;
-            switch (type) {
-              case 'title': {
-                if (Array.isArray(value?.title)) return { title: sanitizeRichTextArray(value.title) };
-                if (typeof value === 'string') return { title: toRichText(value) };
-                if (typeof value?.text === 'string') return { title: toRichText(value.text) };
-                if (Array.isArray(value)) return { title: sanitizeRichTextArray(value) };
-                return undefined;
-              }
-              case 'rich_text': {
-                if (Array.isArray(value?.rich_text)) return { rich_text: sanitizeRichTextArray(value.rich_text) };
-                if (typeof value === 'string') return { rich_text: toRichText(value) };
-                if (typeof value?.text === 'string') return { rich_text: toRichText(value.text) };
-                if (Array.isArray(value)) return { rich_text: sanitizeRichTextArray(value) };
-                return undefined;
-              }
-              case 'url': {
-                const url = typeof value === 'string' ? value : value?.url;
-                if (typeof url === 'string' && url.length > 0) return { url };
-                return undefined;
-              }
-              case 'files': {
-                // Accept arrays of strings (external URLs) or file/external/file_upload objects
-                const arr = Array.isArray(value) ? value : (Array.isArray(value?.files) ? value.files : undefined);
-                if (!Array.isArray(arr)) return undefined;
-                const files = [];
-                for (const item of arr) {
-                  if (!item) continue;
-                  if (typeof item === 'string') {
-                    files.push({ name: guessNameFromUrl(item, 'image'), external: { url: item } });
-                    continue;
-                  }
-                  if (typeof item?.url === 'string') {
-                    files.push({ name: guessNameFromUrl(item.url, item.name || 'image'), external: { url: item.url } });
-                    continue;
-                  }
-                  if (item.external?.url) {
-                    files.push({ name: item.name || guessNameFromUrl(item.external.url, 'image'), external: { url: item.external.url } });
-                    continue;
-                  }
-                  if (item.file_upload?.file_upload_id) {
-                    files.push({ name: item.name || 'image', file_upload: { file_upload_id: item.file_upload.file_upload_id } });
-                    continue;
-                  }
-                }
-                return files.length ? { files } : undefined;
-              }
-              case 'email': {
-                const email = typeof value === 'string' ? value : value?.email;
-                if (typeof email === 'string' && email.length > 0) return { email };
-                return undefined;
-              }
-              case 'phone_number': {
-                const phone = typeof value === 'string' ? value : value?.phone_number;
-                if (typeof phone === 'string' && phone.length > 0) return { phone_number: phone };
-                return undefined;
-              }
-              case 'number': {
-                const num = typeof value === 'number' ? value : Number(value?.number ?? value);
-                if (!Number.isNaN(num)) return { number: num };
-                return undefined;
-              }
-              case 'checkbox': {
-                const bool = typeof value === 'boolean' ? value : (typeof value === 'string' ? value.toLowerCase() === 'true' : undefined);
-                if (typeof bool === 'boolean') return { checkbox: bool };
-                return undefined;
-              }
-              case 'select': {
-                const name = typeof value === 'string' ? value : value?.select?.name ?? value?.name;
-                if (typeof name === 'string' && name.trim().length > 0) return { select: { name: name.trim() } };
-                return undefined;
-              }
-              case 'multi_select': {
-                const arr = Array.isArray(value) ? value : (Array.isArray(value?.multi_select) ? value.multi_select : (typeof value === 'string' ? value.split(',') : undefined));
-                if (Array.isArray(arr)) {
-                  const cleaned = arr
-                    .map((v) => (typeof v === 'string' ? v.trim() : v?.name))
-                    .filter((n) => typeof n === 'string' && n.length > 0)
-                    .map((name) => ({ name }));
-                  if (cleaned.length > 0) return { multi_select: cleaned };
-                }
-                return undefined;
-              }
-              case 'status': {
-                const name = typeof value === 'string' ? value : value?.status?.name ?? value?.name;
-                if (typeof name === 'string' && name.length > 0) return { status: { name } };
-                return undefined;
-              }
-              case 'date': {
-                // Normalize to { date: { start, end?, time_zone? } }
-                if (typeof value === 'string') return { date: { start: value } };
-                if (value && typeof value === 'object') {
-                  if (typeof value.date === 'string') return { date: { start: value.date } };
-                  if (value.date && typeof value.date === 'object') {
-                    const d = value.date;
-                    const cleaned = {};
-                    if (typeof d.start === 'string') cleaned.start = d.start;
-                    if (typeof d.end === 'string') cleaned.end = d.end;
-                    if (typeof d.time_zone === 'string') cleaned.time_zone = d.time_zone;
-                    if (Object.keys(cleaned).length > 0) return { date: cleaned };
-                  }
-                  // Accept shorthand { start, end?, time_zone? }
-                  if (typeof value.start === 'string' || typeof value.end === 'string' || typeof value.time_zone === 'string') {
-                    const cleaned = {};
-                    if (typeof value.start === 'string') cleaned.start = value.start;
-                    if (typeof value.end === 'string') cleaned.end = value.end;
-                    if (typeof value.time_zone === 'string') cleaned.time_zone = value.time_zone;
-                    return { date: cleaned };
-                  }
-                }
-                return undefined;
-              }
-              default:
-                // For people, files, relation, rollup etc., skip unless the model provided a valid object we recognize
-                return undefined;
-            }
-          }
-
-          // Normalize only properties that exist in schema
-          for (const [propName, def] of Object.entries(schema)) {
-            const raw = props[propName];
-            if (raw === undefined) continue;
+        sendResponse({ ok: true, page });
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e.message || e) });
+      }
+      return;
+    }
             const normalized = normalizeValueByType(def, raw);
             if (normalized && typeof normalized === 'object' && Object.keys(normalized).length > 0) {
               out[propName] = normalized;
