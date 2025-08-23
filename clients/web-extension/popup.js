@@ -274,10 +274,10 @@ async function openTokensView() {
   await refreshLinkedWorkspaces();
 
   // Populate model selector based on available keys
-  const options = [];
-  if (openaiKey) options.push({ value: 'openai:gpt-5-nano', label: 'OpenAI · GPT-5 Nano' });
-  if (googleApiKey) options.push({ value: 'google:gemini-2.5-flash', label: 'Google · Gemini 2.5 Flash' });
-  if (options.length === 0) options.push({ value: 'openai:gpt-5-nano', label: 'OpenAI · GPT-5 Nano' });
+  const options = [
+    { value: 'openai:gpt-5-nano', label: 'OpenAI · GPT-5 Nano' },
+    { value: 'google:gemini-2.5-flash', label: 'Google · Gemini 2.5 Flash' },
+  ];
   if (tModel) {
     tModel.innerHTML = '';
     for (const o of options) {
@@ -288,6 +288,25 @@ async function openTokensView() {
     const found = Array.from(tModel.options).some((o) => o.value === desired);
     tModel.value = found ? desired : options[0].value;
   }
+  // GPT-5 options show/hide
+  const gpt5Options = document.getElementById('gpt5Options');
+  const tGpt5Reasoning = document.getElementById('tGpt5Reasoning');
+  const tGpt5Verbosity = document.getElementById('tGpt5Verbosity');
+  const showGpt5 = () => {
+    try {
+      const val = String(tModel?.value || '').toLowerCase();
+      const isGpt5 = val.startsWith('openai:gpt-5');
+      if (gpt5Options) gpt5Options.style.display = isGpt5 ? 'block' : 'none';
+    } catch {}
+  };
+  showGpt5();
+  if (tModel) tModel.addEventListener('change', showGpt5);
+  // Load saved GPT-5 prefs
+  try {
+    const { openai_reasoning_effort, openai_verbosity } = await getStorage(['openai_reasoning_effort', 'openai_verbosity']);
+    if (tGpt5Reasoning && typeof openai_reasoning_effort === 'string') tGpt5Reasoning.value = openai_reasoning_effort;
+    if (tGpt5Verbosity && typeof openai_verbosity === 'string') tGpt5Verbosity.value = openai_verbosity;
+  } catch {}
   if (appView) appView.style.display = 'none';
   if (tokensStatus) tokensStatus.textContent = '';
   if (tokensView) tokensView.style.display = 'block';
@@ -591,15 +610,23 @@ async function main() {
   if (tokensSave) tokensSave.addEventListener('click', async () => {
     tokensStatus.textContent = '';
     tokensStatus.classList.remove('success');
-    const notionToken = document.getElementById('tNotionToken').value.trim();
-    const openaiKey = document.getElementById('tOpenAI').value.trim();
-    const googleApiKey = document.getElementById('tGoogle').value.trim();
+    const notionToken = document.getElementById('tNotionToken')?.value?.trim() || '';
     const backendUrl = document.getElementById('tBackendUrl').value.trim();
     const workspaceId = document.getElementById('tWorkspaceId').value.trim();
     const [provider, ...rest] = String(tModel?.value || 'openai:gpt-5-nano').split(':');
     const llmProvider = provider || 'openai';
     const llmModel = rest.join(':') || 'gpt-5-nano';
-    await setStorage({ notionToken, openaiKey, googleApiKey, llmProvider, llmModel, backendUrl, workspaceId });
+    const gpt5Reasoning = document.getElementById('tGpt5Reasoning')?.value || 'low';
+    const gpt5Verbosity = document.getElementById('tGpt5Verbosity')?.value || 'low';
+    await setStorage({
+      notionToken,
+      llmProvider,
+      llmModel,
+      backendUrl,
+      workspaceId,
+      openai_reasoning_effort: gpt5Reasoning,
+      openai_verbosity: gpt5Verbosity,
+    });
     tokensStatus.textContent = 'Saved ✓';
     tokensStatus.classList.add('success');
     await precheck({ preserveViews: true });
