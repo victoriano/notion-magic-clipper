@@ -154,13 +154,16 @@ async function precheck(opts = {}) {
   const app = document.getElementById('app');
   const indicator = document.getElementById('statusIndicator');
   const cfg = await getStorage(['notionToken', 'openaiKey', 'googleApiKey', 'llmProvider', 'llmModel', 'backendUrl', 'workspaceTokens']);
-  const defaultBackendBase = 'https://magic-clipper.vercel.app';
-  try {
-    if (!cfg.backendUrl || /^https?:\/\/localhost:3000\/?$/i.test(cfg.backendUrl)) {
-      await setStorage({ backendUrl: defaultBackendBase });
-      cfg.backendUrl = defaultBackendBase;
-    }
-  } catch {}
+  const prodBackend = 'https://magic-clipper.vercel.app';
+  // Decide default backend only if none is set
+  if (!cfg.backendUrl) {
+    // Heuristic: prefer localhost during unpacked/dev usage.
+    const PROD_EXTENSION_ID = 'gohplijlpngkipjghachaaepbdlfabhk'; // set to your Web Store ID; leave as-is if unknown
+    const isProdExtension = (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id === PROD_EXTENSION_ID);
+    const chosen = isProdExtension ? prodBackend : 'http://localhost:3000';
+    await setStorage({ backendUrl: chosen });
+    cfg.backendUrl = chosen;
+  }
   const provider = cfg.llmProvider || 'openai';
   const model = cfg.llmModel || 'gpt-5-nano';
   const tokensMap = cfg.workspaceTokens && typeof cfg.workspaceTokens === 'object' ? cfg.workspaceTokens : {};

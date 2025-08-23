@@ -9,6 +9,50 @@ const OPENAI_API_BASE = 'https://api.openai.com/v1';
 const GPT5_NANO_MODEL = 'gpt-5-nano';
 const GOOGLE_GENAI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
+// Visual DEV badge for unpacked/local builds
+const PROD_EXTENSION_ID = 'gohplijlpngkipjghachaaepbdlfabhk'; // update to your published Web Store ID
+async function updateBadge() {
+  try {
+    const { backendUrl } = await getConfig();
+    const usingLocal = typeof backendUrl === 'string' && /^https?:\/\/localhost(?::\d+)?/i.test(backendUrl);
+    const isProdExtension = (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id === PROD_EXTENSION_ID);
+    if (!isProdExtension || usingLocal) {
+      try { await chrome.action.setBadgeBackgroundColor({ color: '#9333ea' }); } catch {}
+      try { await chrome.action.setBadgeText({ text: 'DEV' }); } catch {}
+      try { await chrome.action.setTitle({ title: 'Notion Magic Clipper — Dev' }); } catch {}
+    } else {
+      try { await chrome.action.setBadgeText({ text: '' }); } catch {}
+      try { await chrome.action.setTitle({ title: 'Notion Magic Clipper' }); } catch {}
+    }
+  } catch {
+    try { await chrome.action.setBadgeText({ text: '' }); } catch {}
+  }
+}
+
+// Resolve backend base URL with localhost preference for unpacked/dev installs when backendUrl is unset
+async function getBackendBase() {
+  try {
+    const { backendUrl } = await getConfig();
+    if (backendUrl && typeof backendUrl === 'string') return backendUrl.replace(/\/$/, '');
+    const isProdExtension = (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id === PROD_EXTENSION_ID);
+    if (!isProdExtension) {
+      return 'http://localhost:3000';
+    }
+  } catch {}
+  return 'https://magic-clipper.vercel.app';
+}
+
+try { chrome.runtime.onInstalled.addListener(() => { updateBadge(); }); } catch {}
+try { chrome.runtime.onStartup.addListener(() => { updateBadge(); }); } catch {}
+try {
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && (changes.backendUrl)) updateBadge();
+  });
+} catch {}
+
+// Kick once
+try { updateBadge(); } catch {}
+
 // Debug logging helper
 const DEBUG_LOGS = true;
 function dbgBg(...args) {
@@ -773,8 +817,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === 'LIST_DATABASES') {
       try {
         dbgBg('LIST_DATABASES: query =', message.query);
-        const { backendUrl, notionSearchQuery } = await getConfig();
-        const base = (backendUrl || 'https://magic-clipper.vercel.app').replace(/\/$/, '');
+        const { notionSearchQuery } = await getConfig();
+        const base = await getBackendBase();
         const url = `${base}/api/databases/search?q=${encodeURIComponent(message.query ?? notionSearchQuery ?? '')}`;
         const resp = await fetch(url, { credentials: 'include' });
         if (!resp.ok) throw new Error(`Backend ${resp.status}`);
@@ -859,7 +903,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const settingsForDb = (databaseSettings || {})[databaseId] || {};
         const legacyPrompt = (databasePrompts || {})[databaseId] || '';
         const customInstructions = (settingsForDb.prompt ?? legacyPrompt) || '';
-        const base = (backendUrl || 'https://magic-clipper.vercel.app').replace(/\/$/, '');
+        const base = backendUrl ? backendUrl.replace(/\/$/, '') : await getBackendBase();
         const url = `${base}/api/clip/save`;
         const payload = { databaseId, pageContext, customInstructions, provider: llmProvider || 'openai', model: llmModel || 'gpt-5-nano' };
         try {
