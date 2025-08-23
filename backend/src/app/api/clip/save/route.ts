@@ -172,10 +172,12 @@ export async function POST(req: NextRequest) {
 
 		let children: any[] = [];
 		if (saveArticle) {
+			// First pass: deterministic article blocks if provided by the client
 			if (Array.isArray(pageContext?.articleBlocks) && pageContext.articleBlocks.length) {
 				children = sanitizeBlocks(pageContext.articleBlocks);
-			} else if (customizeContent && contentPrompt && typeof pageContext?.article?.html === 'string' && pageContext.article.html.length) {
-				// Ask the LLM to transform the article HTML into Notion blocks
+			}
+			// Optional: LLM-based customization pass when requested (even if we had articleBlocks)
+			if (customizeContent && contentPrompt && typeof pageContext?.article?.html === 'string' && pageContext.article.html.length) {
 				const transformMessages = [
 					{ role: 'system', content: [
 						'You convert ARTICLE HTML into a JSON array of Notion blocks according to the user instructions.',
@@ -193,10 +195,25 @@ export async function POST(req: NextRequest) {
 						const raw = tJson?.content || '';
 						let parsedBlocks: any = null;
 						const trim = typeof raw === 'string' ? raw.trim() : '';
+						// 1) pure array
 						if (trim.startsWith('[')) { try { parsedBlocks = JSON.parse(trim); } catch {} }
+						// 2) try direct parse
 						if (!parsedBlocks) { try { parsedBlocks = JSON.parse(raw); } catch {} }
-						if (!parsedBlocks) { parsedBlocks = null; }
-						if (Array.isArray(parsedBlocks)) children = sanitizeBlocks(parsedBlocks);
+						// 3) fenced JSON array
+						if (!parsedBlocks) {
+							const fence = String(raw).match(/```(?:json)?\n([\s\S]*?)\n```/i);
+							if (fence) { try { parsedBlocks = JSON.parse(fence[1]); } catch {} }
+						}
+						// 4) object wrappers
+						if (parsedBlocks && !Array.isArray(parsedBlocks)) {
+							if (Array.isArray(parsedBlocks.children)) parsedBlocks = parsedBlocks.children;
+							else if (Array.isArray((parsedBlocks as any).blocks)) parsedBlocks = (parsedBlocks as any).blocks;
+							else if (Array.isArray((parsedBlocks as any).content)) parsedBlocks = (parsedBlocks as any).content;
+						}
+						if (Array.isArray(parsedBlocks)) {
+							const safeTransformed = sanitizeBlocks(parsedBlocks);
+							if (safeTransformed.length > 0) children = safeTransformed;
+						}
 					}
 				} catch {}
 			}
