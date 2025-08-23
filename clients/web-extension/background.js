@@ -903,9 +903,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const settingsForDb = (databaseSettings || {})[databaseId] || {};
         const legacyPrompt = (databasePrompts || {})[databaseId] || '';
         const customInstructions = (settingsForDb.prompt ?? legacyPrompt) || '';
+        const saveArticle = settingsForDb.saveArticle !== false;
+        const customizeContent = settingsForDb.customizeContent === true;
+        const contentPrompt = typeof settingsForDb.contentPrompt === 'string' ? settingsForDb.contentPrompt.trim() : '';
+        const { openai_reasoning_effort, openai_verbosity } = await getConfig();
         const base = backendUrl ? backendUrl.replace(/\/$/, '') : await getBackendBase();
         const url = `${base}/api/clip/save`;
-        const payload = { databaseId, pageContext, customInstructions, provider: llmProvider || 'openai', model: llmModel || 'gpt-5-nano' };
+        const payload = {
+          databaseId,
+          pageContext,
+          customInstructions,
+          provider: llmProvider || 'openai',
+          model: llmModel || 'gpt-5-nano',
+          saveArticle,
+          customizeContent,
+          contentPrompt,
+          reasoning_effort: openai_reasoning_effort || 'low',
+          verbosity: openai_verbosity || 'low'
+        };
         try {
           const approxSize = (() => { try { return JSON.stringify(payload).length; } catch { return 0; }})();
           dbgBg('BACKEND_REQUEST', { url, method: 'POST', approxPayloadBytes: approxSize });

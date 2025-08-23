@@ -59,6 +59,11 @@ export async function POST(req: NextRequest) {
 		const customInstructions: string = body?.customInstructions || '';
 		const provider: 'openai' | 'google' = (body?.provider === 'google' ? 'google' : 'openai');
 		const model: string = typeof body?.model === 'string' ? body.model : (provider === 'google' ? 'gemini-2.5-flash' : 'gpt-5-nano');
+		const saveArticle: boolean = body?.saveArticle !== false; // default true when omitted
+		const customizeContent: boolean = body?.customizeContent === true;
+		const contentPrompt: string = typeof body?.contentPrompt === 'string' ? body.contentPrompt.trim() : '';
+		const reasoning_effort: string | undefined = typeof body?.reasoning_effort === 'string' ? body.reasoning_effort : undefined;
+		const verbosity: string | undefined = typeof body?.verbosity === 'string' ? body.verbosity : undefined;
 		if (!databaseId || !pageContext) return withCors(req, NextResponse.json({ error: 'Missing databaseId or pageContext' }, { status: 400 }));
 
 		const { data: rows, error } = await supabaseAdmin
@@ -128,7 +133,7 @@ export async function POST(req: NextRequest) {
 		// Call internal LLM endpoint
 		const base = new URL(req.url);
 		const llmUrl = `${base.origin}/api/llm/chat`;
-		const llmResp = await fetch(llmUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider, model, messages }) });
+		const llmResp = await fetch(llmUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider, model, messages, reasoning_effort, verbosity }) });
 		if (!llmResp.ok) {
 			const t = await llmResp.text().catch(() => '');
 			return withCors(req, NextResponse.json({ error: `LLM error: ${t}` }, { status: 500 }));
@@ -142,9 +147,72 @@ export async function POST(req: NextRequest) {
 		const urlPropName = Object.entries(db.properties || {}).find(([, def]: any) => def.type === 'url')?.[0];
 		if (urlPropName && !parsed.properties[urlPropName] && pageContext.url) parsed.properties[urlPropName] = { url: pageContext.url };
 
-		// Create page (no children here; keep server endpoint minimal)
-		const bodyCreate = { parent: { database_id: databaseId }, properties: parsed.properties };
+		// Prepare children blocks if requested
+		function toRichText(text: string) { return [{ type: 'text', text: { content: String(text || '') } }]; }
+		function sanitizeBlocks(rawBlocks: any[]): any[] {
+			if (!Array.isArray(rawBlocks)) return [];
+			const allowed = new Set(['paragraph','heading_1','heading_2','heading_3','bulleted_list_item','numbered_list_item','quote','image']);
+			const out: any[] = [];
+			for (const b of rawBlocks) {
+				if (typeof b === 'string') { out.push({ object: 'block', type: 'paragraph', paragraph: { rich_text: toRichText(b) } }); continue; }
+				if (!b || typeof b !== 'object') continue;
+				const type = b.type;
+				if (!allowed.has(type)) continue;
+				if (type === 'image') {
+					const url = b?.image?.external?.url || b?.url;
+					if (typeof url === 'string' && url) { out.push({ object: 'block', type: 'image', image: { external: { url } } }); }
+					continue;
+				}
+				const field = (b as any)[type];
+				const txt = field?.rich_text || field?.text || (b as any).text || (b as any).content || '';
+				out.push({ object: 'block', type, [type]: { rich_text: Array.isArray(txt) ? txt : toRichText(txt) } });
+			}
+			return out;
+		}
+
+		let children: any[] = [];
+		if (saveArticle) {
+			if (Array.isArray(pageContext?.articleBlocks) && pageContext.articleBlocks.length) {
+				children = sanitizeBlocks(pageContext.articleBlocks);
+			} else if (customizeContent && contentPrompt && typeof pageContext?.article?.html === 'string' && pageContext.article.html.length) {
+				// Ask the LLM to transform the article HTML into Notion blocks
+				const transformMessages = [
+					{ role: 'system', content: [
+						'You convert ARTICLE HTML into a JSON array of Notion blocks according to the user instructions.',
+						'Output rules: Return ONLY a raw JSON array (no wrapper object, no code fences).',
+						'Allowed block types: paragraph, heading_1, heading_2, heading_3, bulleted_list_item, numbered_list_item, quote, image.',
+						'For text blocks use simple rich_text with plain text only.'
+					].join(' ') },
+					{ role: 'user', content: `Article HTML:\n${pageContext.article.html}` },
+					{ role: 'user', content: `Transform instructions:\n${contentPrompt}` }
+				];
+				try {
+					const tResp = await fetch(llmUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider, model, messages: transformMessages, reasoning_effort, verbosity }) });
+					if (tResp.ok) {
+						const tJson = await tResp.json();
+						const raw = tJson?.content || '';
+						let parsedBlocks: any = null;
+						const trim = typeof raw === 'string' ? raw.trim() : '';
+						if (trim.startsWith('[')) { try { parsedBlocks = JSON.parse(trim); } catch {} }
+						if (!parsedBlocks) { try { parsedBlocks = JSON.parse(raw); } catch {} }
+						if (!parsedBlocks) { parsedBlocks = null; }
+						if (Array.isArray(parsedBlocks)) children = sanitizeBlocks(parsedBlocks);
+					}
+				} catch {}
+			}
+		}
+
+		const firstBatch = Array.isArray(children) ? children.slice(0, 100) : [];
+		const bodyCreate: any = { parent: { database_id: databaseId }, properties: parsed.properties };
+		if (firstBatch.length > 0) bodyCreate.children = firstBatch;
 		const created = await notionFetch('/pages', { method: 'POST', body: JSON.stringify(bodyCreate) }, notionToken);
+		// Append remaining children if any
+		const rest = Array.isArray(children) ? children.slice(100) : [];
+		const parentId = created?.id;
+		for (let i = 0; i < rest.length && parentId; i += 100) {
+			const chunk = rest.slice(i, i + 100);
+			try { await notionFetch(`/blocks/${parentId}/children`, { method: 'PATCH', body: JSON.stringify({ children: chunk }) }, notionToken); } catch {}
+		}
 		return withCors(req, NextResponse.json({ page: created }));
 	} catch (e: any) {
 		return withCors(req, NextResponse.json({ error: String(e?.message || e) }, { status: 500 }));
