@@ -6,6 +6,8 @@ type Env = {
 	SUPABASE_URL: string;
 	SUPABASE_ANON_KEY: string;
 	SUPABASE_SERVICE_ROLE_KEY?: string;
+	OPENAI_API_KEY?: string;
+	GOOGLE_API_KEY?: string;
 };
 
 const env: Env = {
@@ -16,6 +18,8 @@ const env: Env = {
 	SUPABASE_URL: required('SUPABASE_URL'),
 	SUPABASE_ANON_KEY: required('SUPABASE_ANON_KEY'),
 	SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
+	OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+	GOOGLE_API_KEY: process.env.GOOGLE_API_KEY,
 };
 
 function required(name: keyof Env | string): string {

@@ -207,17 +207,31 @@
           </div>
         </div>
         <hr class="divider" />
-        <label for="tOpenAI">OpenAI API Key</label>
-        <input id="tOpenAI" type="password" placeholder="sk-..." />
-        <small>Your API key is stored in the extension's local storage.</small>
-        <hr class="divider" />
-        <label for="tGoogle">Google AI API Key</label>
-        <input id="tGoogle" type="password" placeholder="AIza..." />
-        <small>Create a key in Google AI Studio and paste it here. It will be stored locally.</small>
-        <hr class="divider" />
         <label for="tModel">Model</label>
         <select id="tModel"></select>
-        <small>Pick the model to use. Make sure the corresponding API key is configured above.</small>
+        <small>Pick the model to use. In production, the server provides the keys.</small>
+        <div id="gpt5Options" style="display:none; margin-top:8px">
+          <label class="section-title">GPT‑5 options</label>
+          <div class="row" style="gap:10px">
+            <div style="flex:1">
+              <label for="tGpt5Reasoning">Reasoning effort</label>
+              <select id="tGpt5Reasoning">
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </div>
+            <div style="flex:1">
+              <label for="tGpt5Verbosity">Verbosity</label>
+              <select id="tGpt5Verbosity">
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </div>
+          </div>
+          <small>These options apply to OpenAI GPT‑5 models only.</small>
+        </div>
         <hr class="divider" />
         <div class="row" style="margin-top:8px">
           <button id="openUntitled" class="btn btn-ghost" style="width:auto; display:inline-flex; align-items:center; gap:6px">

@@ -153,24 +153,21 @@ async function precheck(opts = {}) {
   const pre = document.getElementById('precheck');
   const app = document.getElementById('app');
   const indicator = document.getElementById('statusIndicator');
-  const cfg = await getStorage(['notionToken', 'openaiKey', 'googleApiKey', 'llmProvider', 'llmModel', 'backendUrl', 'workspaceTokens']);
-  const defaultBackendBase = 'https://magic-clipper.vercel.app';
-  try {
-    if (!cfg.backendUrl || /^https?:\/\/localhost:3000\/?$/i.test(cfg.backendUrl)) {
-      await setStorage({ backendUrl: defaultBackendBase });
-      cfg.backendUrl = defaultBackendBase;
-    }
-  } catch {}
+  const cfg = await getStorage(['notionToken', 'llmProvider', 'llmModel', 'backendUrl', 'workspaceTokens']);
+  const prodBackend = 'https://magic-clipper.vercel.app';
+  // Decide default backend only if none is set
+  if (!cfg.backendUrl) {
+    // Heuristic: prefer localhost during unpacked/dev usage.
+    const PROD_EXTENSION_ID = 'gohplijlpngkipjghachaaepbdlfabhk'; // set to your Web Store ID; leave as-is if unknown
+    const isProdExtension = (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id === PROD_EXTENSION_ID);
+    const chosen = isProdExtension ? prodBackend : 'http://localhost:3000';
+    await setStorage({ backendUrl: chosen });
+    cfg.backendUrl = chosen;
+  }
   const provider = cfg.llmProvider || 'openai';
   const model = cfg.llmModel || 'gpt-5-nano';
   const tokensMap = cfg.workspaceTokens && typeof cfg.workspaceTokens === 'object' ? cfg.workspaceTokens : {};
   const hasNotion = Object.keys(tokensMap).length > 0 || !!cfg.notionToken;
-  const hasOpenAI = !!cfg.openaiKey;
-  const hasGoogle = !!cfg.googleApiKey;
-  let hasLLM = false;
-  if (provider === 'openai') hasLLM = hasOpenAI;
-  else if (provider === 'google') hasLLM = hasGoogle;
-  else hasLLM = hasOpenAI || hasGoogle; // fallback if unknown provider
   const ok = hasNotion; // account connected is sufficient to turn green
   if (indicator) {
     indicator.classList.toggle('ok', ok);
@@ -189,8 +186,6 @@ async function openTokensView() {
   const tModel = document.getElementById('tModel');
   const appView = document.getElementById('app');
   const notionInput = document.getElementById('tNotionToken');
-  const openaiInput = document.getElementById('tOpenAI');
-  const googleInput = document.getElementById('tGoogle');
   const backendInput = document.getElementById('tBackendUrl');
   const workspaceInput = document.getElementById('tWorkspaceId');
   const advancedBackendRow = document.getElementById('advancedBackendRow');
@@ -199,10 +194,8 @@ async function openTokensView() {
   const logoutBtn = document.getElementById('logoutBtn');
   const connectWorkspaceBtn = document.getElementById('connectWorkspaceBtn');
 
-  const { notionToken, openaiKey, googleApiKey, llmProvider, llmModel, backendUrl, workspaceId } = await getStorage(['notionToken', 'openaiKey', 'googleApiKey', 'llmProvider', 'llmModel', 'backendUrl', 'workspaceId']);
+  const { notionToken, llmProvider, llmModel, backendUrl, workspaceId } = await getStorage(['notionToken', 'llmProvider', 'llmModel', 'backendUrl', 'workspaceId']);
   if (notionInput) notionInput.value = notionToken || '';
-  if (openaiInput) openaiInput.value = openaiKey || '';
-  if (googleInput) googleInput.value = googleApiKey || '';
   if (backendInput) backendInput.value = (backendUrl || defaultBackendBase);
   if (workspaceInput) workspaceInput.value = workspaceId || '';
   // Hide backend + legacy token UI by default; show only if a dev flag is set
@@ -271,10 +264,10 @@ async function openTokensView() {
   await refreshLinkedWorkspaces();
 
   // Populate model selector based on available keys
-  const options = [];
-  if (openaiKey) options.push({ value: 'openai:gpt-5-nano', label: 'OpenAI · GPT-5 Nano' });
-  if (googleApiKey) options.push({ value: 'google:gemini-2.5-flash', label: 'Google · Gemini 2.5 Flash' });
-  if (options.length === 0) options.push({ value: 'openai:gpt-5-nano', label: 'OpenAI · GPT-5 Nano' });
+  const options = [
+    { value: 'openai:gpt-5-nano', label: 'OpenAI · GPT-5 Nano' },
+    { value: 'google:gemini-2.5-flash', label: 'Google · Gemini 2.5 Flash' },
+  ];
   if (tModel) {
     tModel.innerHTML = '';
     for (const o of options) {
@@ -285,6 +278,25 @@ async function openTokensView() {
     const found = Array.from(tModel.options).some((o) => o.value === desired);
     tModel.value = found ? desired : options[0].value;
   }
+  // GPT-5 options show/hide
+  const gpt5Options = document.getElementById('gpt5Options');
+  const tGpt5Reasoning = document.getElementById('tGpt5Reasoning');
+  const tGpt5Verbosity = document.getElementById('tGpt5Verbosity');
+  const showGpt5 = () => {
+    try {
+      const val = String(tModel?.value || '').toLowerCase();
+      const isGpt5 = val.startsWith('openai:gpt-5');
+      if (gpt5Options) gpt5Options.style.display = isGpt5 ? 'block' : 'none';
+    } catch {}
+  };
+  showGpt5();
+  if (tModel) tModel.addEventListener('change', showGpt5);
+  // Load saved GPT-5 prefs
+  try {
+    const { openai_reasoning_effort, openai_verbosity } = await getStorage(['openai_reasoning_effort', 'openai_verbosity']);
+    if (tGpt5Reasoning && typeof openai_reasoning_effort === 'string') tGpt5Reasoning.value = openai_reasoning_effort;
+    if (tGpt5Verbosity && typeof openai_verbosity === 'string') tGpt5Verbosity.value = openai_verbosity;
+  } catch {}
   if (appView) appView.style.display = 'none';
   if (tokensStatus) tokensStatus.textContent = '';
   if (tokensView) tokensView.style.display = 'block';
@@ -568,8 +580,6 @@ async function main() {
         notionToken: '',
         workspaceTokens: {},
         workspaceId: '',
-        openaiKey: '',
-        googleApiKey: '',
         llmProvider: 'openai',
         llmModel: 'gpt-5-nano',
         databaseSettings: {},
@@ -588,15 +598,23 @@ async function main() {
   if (tokensSave) tokensSave.addEventListener('click', async () => {
     tokensStatus.textContent = '';
     tokensStatus.classList.remove('success');
-    const notionToken = document.getElementById('tNotionToken').value.trim();
-    const openaiKey = document.getElementById('tOpenAI').value.trim();
-    const googleApiKey = document.getElementById('tGoogle').value.trim();
+    const notionToken = document.getElementById('tNotionToken')?.value?.trim() || '';
     const backendUrl = document.getElementById('tBackendUrl').value.trim();
     const workspaceId = document.getElementById('tWorkspaceId').value.trim();
     const [provider, ...rest] = String(tModel?.value || 'openai:gpt-5-nano').split(':');
     const llmProvider = provider || 'openai';
     const llmModel = rest.join(':') || 'gpt-5-nano';
-    await setStorage({ notionToken, openaiKey, googleApiKey, llmProvider, llmModel, backendUrl, workspaceId });
+    const gpt5Reasoning = document.getElementById('tGpt5Reasoning')?.value || 'low';
+    const gpt5Verbosity = document.getElementById('tGpt5Verbosity')?.value || 'low';
+    await setStorage({
+      notionToken,
+      llmProvider,
+      llmModel,
+      backendUrl,
+      workspaceId,
+      openai_reasoning_effort: gpt5Reasoning,
+      openai_verbosity: gpt5Verbosity,
+    });
     tokensStatus.textContent = 'Saved ✓';
     tokensStatus.classList.add('success');
     await precheck({ preserveViews: true });
