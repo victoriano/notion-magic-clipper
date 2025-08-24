@@ -187,34 +187,67 @@ export async function POST(req: NextRequest) {
 		const schemaForLLM = extractSchemaForPrompt(db);
 
 		function buildMessages() {
+			const { url, title, meta, selectionText, textSample, headings, listItems, shortSpans, attrTexts, images, article } = pageContext || {};
+			const useArticle = saveArticle;
 			const schemaStr = JSON.stringify(schemaForLLM, null, 2);
-			const baseContext: any = { url: pageContext.url, title: pageContext.title, meta: pageContext.meta, selectionText: pageContext.selectionText, images: pageContext.images };
-			if (pageContext?.article && pageContext.article.text) baseContext.article = { title: pageContext.article.title, text: pageContext.article.text };
-			if (pageContext?.textSample) baseContext.textSample = pageContext.textSample;
+
+			// If we should not use the article, ensure we provide a sample: use existing textSample or derive from article.text
+			let effectiveTextSample = textSample;
+			if (!useArticle) {
+				if (!effectiveTextSample && article && typeof article.text === 'string') {
+					try {
+						const parts = article.text.split(/\n\s*\n+/).map((s: string) => s.trim()).filter(Boolean);
+						effectiveTextSample = parts.slice(0, 10).join('\n\n').slice(0, 6000);
+					} catch {}
+				}
+			}
+
+			// Build a slimmer context when article is present
+			let baseContext: any;
+			if (useArticle && article) {
+				baseContext = { url, title, meta, selectionText, article: { title: article.title, text: article.text }, images };
+			} else {
+				baseContext = { url, title, meta, selectionText, headings, listItems, shortSpans, attrTexts, images };
+			}
+			if (useArticle && !article) {
+				// If useArticle requested but no article, keep non-article context
+			}
+			if (effectiveTextSample) Object.assign(baseContext, { textSample: effectiveTextSample });
 			const contextStr = JSON.stringify(baseContext, null, 2);
 			const messages = [
-				{ role: 'system', content: [
+				{
+					role: 'system',
+					content: [
 					'You are an assistant that generates Notion PROPERTIES only from a database schema and page context.',
 					'Return only VALID JSON shaped as { "properties": { ... } } (do NOT include "children").',
 					'- "properties": must use the exact Notion API structure and respect the provided schema types.',
 					'- Title rules: The "title" property is MANDATORY and must be a strong, source-derived headline or entity name. Never return placeholders or generic values such as "Untitled", "New Page", "No title", "Home", or an empty string. Prefer the article title or first H1/H2; if unavailable, use meta og:title/twitter:title; otherwise derive from the URL slug by turning hyphen/underscore-separated words into a clean title. Remove site/section names, sources, categories, bylines, prefixes/suffixes, emojis, quotes, URLs, and separators like "|" or "/". Keep it concise (3–80 characters), Title Case when appropriate, and trim trailing punctuation.'
-				].join(' ') },
-				{ role: 'user', content: [
+					].join(' ')
+				},
+				{
+					role: 'user',
+					content: [
 					`Database schema (properties):\n${schemaStr}`,
 					`\nPage context:\n${contextStr}`,
 					'\n\nInstructions:',
 					'- Fill as many properties as possible based on the context.',
-					'- The "title" property is REQUIRED. Compose the best possible title.',
-					'- For select/multi_select: use existing options by exact name. Do NOT create new options by default.',
-					'- If a property name suggests an image and there is an image URL, prefer filling that property with the image URL (files external URL shape).',
-					'- For dates, if no specific date is found, you may use the current date/time.',
-					'- For url, set the page URL if appropriate.',
-					'- Omit properties you cannot determine. Do NOT include read-only properties.',
-					'- Do NOT include "children". Return ONLY one JSON object shaped as { "properties": { ... } }.'
-				].join('\n') }
+						'- The "title" property is REQUIRED. Compose the best possible title using content signals in this priority: article.title or H1 > H2 > og:title/twitter:title > URL slug. Do NOT include site names, categories, or sources; never output placeholders like "Untitled" or "New Page". Use concise Title Case, 3–80 characters, no emojis, no quotes, and avoid separators like "|" or "/". If the database suggests an entity type (people, companies, movies, recipes, etc.), set the title to that entity\'s clean name.',
+						'- For select/multi_select: use existing options by exact name. Do NOT create new options by default. Only propose new options if the custom database instructions explicitly allow creating options. If no clear match exists and creation is not allowed, omit the property.',
+						'- If a property name suggests an image (e.g., "Poster", "Cover", "Thumbnail", "Artwork", "Image", "Screenshot") and the page context contains an image URL (e.g., og:image or twitter:image), prefer filling that property with the image URL. If the database uses a files property, use the Notion files property shape with an external URL. Optionally, also add an image block to children using the same URL.',
+						'- When choosing among multiple images, prefer medium-to-large content images (avoid tiny icons/sprites). As a heuristic, prioritize images where width or height ≥ 256px and de-prioritize those < 64px. Use the collected image context (alt text, nearest heading, parent text, classes, and any width/height or rendered sizes) to decide.',
+						'- For dates, if no specific date is found in the content, you may use the current date/time.',
+						'- For url, set the page URL if an appropriate property exists.',
+						'- Omit properties you cannot determine (do not invent values).',
+						'- Do NOT include read-only properties (rollup, created_time, etc.).',
+						'- Do NOT generate "children". Return ONLY one JSON object shaped as { "properties": { ... } }.'
+					].join('\n')
+				}
 			];
-			if (customInstructions && typeof customInstructions === 'string' && customInstructions.trim()) {
-				messages.push({ role: 'user', content: `Custom instructions specific to this database:\n${customInstructions.trim()}` });
+			if (customInstructions && typeof customInstructions === 'string' && customInstructions.trim().length > 0) {
+				messages.push({
+					role: 'user',
+					content: `Custom instructions specific to this database:\n${customInstructions.trim()}`
+				});
 			}
 			return messages;
 		}
@@ -373,18 +406,32 @@ export async function POST(req: NextRequest) {
 			return out;
 		}
 		let safeProps = sanitizeProperties(db, parsed.properties);
-		// Ensure title property exists
+		// Ensure title property exists and is non-empty/non-placeholder
 		const titlePropName = Object.entries(db.properties || {}).find(([, def]: any) => def.type === 'title')?.[0];
 		if (titlePropName) {
+			const computedTitle = String(pageContext.title || pageContext.meta?.['og:title'] || pageContext.url || 'Untitled');
 			const existing: any = (safeProps as any)[titlePropName];
-			const hasValidTitle = Array.isArray(existing?.title) && existing.title.length > 0;
-			if (!hasValidTitle) (safeProps as any)[titlePropName] = { title: toRichText(pageContext.title || pageContext.meta?.['og:title'] || pageContext.url || 'Untitled') };
+			function extractPlainText(arr: any[]): string {
+				if (!Array.isArray(arr)) return '';
+				return arr
+					.map((r: any) => (typeof r?.text?.content === 'string' ? r.text.content : (typeof r?.plain_text === 'string' ? r.plain_text : '')))
+					.filter(Boolean)
+					.join(' ')
+					.trim();
+			}
+			function isPlaceholderTitle(s: string): boolean {
+				const v = s.trim().toLowerCase();
+				return v === '' || v === 'untitled' || v === 'new page' || v === 'no title' || v === 'home';
+			}
+			const existingText = extractPlainText(existing?.title);
+			const hasValidTitle = typeof existingText === 'string' && !isPlaceholderTitle(existingText);
+			if (!hasValidTitle) (safeProps as any)[titlePropName] = { title: toRichText(computedTitle) };
 		}
 
 		// Ensure select/multi_select options exist (auto-create missing ones when capacity allows)
 		async function ensureSelectOptions(databaseId: string, props: any) {
 			const updates: any = {};
-			for (const [propName, def] of Object.entries(db.properties || {})) {
+			for (const [propName, def] of Object.entries(db.properties || {}) as [string, any][]) {
 				const incoming = (props as any)[propName];
 				if (!incoming) continue;
 				if (def.type === 'select' && incoming.select?.name) {
@@ -412,7 +459,7 @@ export async function POST(req: NextRequest) {
 					if (def.type === 'select') return [k, { select: { options: v } }];
 					if (def.type === 'multi_select') return [k, { multi_select: { options: v } }];
 					return [k, v];
-				})) }) }, notionToken);
+				})) }) }, notionToken as string);
 			}
 		}
 		await ensureSelectOptions(databaseId, safeProps);
