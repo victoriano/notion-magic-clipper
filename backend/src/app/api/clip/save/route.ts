@@ -272,7 +272,7 @@ export async function POST(req: NextRequest) {
 				try {
 					const { data: inserted, error: insErr } = await supabaseAdmin
 						.from('notion_saves')
-						.insert({ user_id: userId, database_id: databaseId, source_url: pageContext?.url || '', status: 'queued' })
+						.insert({ user_id: userId, database_id: databaseId, source_url: pageContext?.url || '', status: 'queued', provider, model })
 						.select()
 						.single();
 					if (insErr) throw insErr;
@@ -304,7 +304,7 @@ export async function POST(req: NextRequest) {
 							const runId: any = (run as any)?.id || (run as any)?.run?.id || null;
 							await supabaseAdmin
 								.from('notion_saves')
-								.update({ run_id: runId || null, task_id: 'saveToNotion', status: 'queued' })
+								.update({ run_id: runId || null, task_id: 'saveToNotion', status: 'queued', provider, model })
 								.eq('id', saveId)
 								.eq('user_id', userId);
 						}

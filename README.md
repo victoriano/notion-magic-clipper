@@ -156,6 +156,56 @@ npx trigger.dev@latest dev --project-ref "$TRIGGER_PROJECT_ID"
 
 3) Use the popup to save pages. When `TRIGGER_SECRET_KEY` is set (and `TRIGGER_PROJECT_ID`), the backend enqueues the save and returns `202` immediately; the page is created in the background and you can monitor runs in Trigger.dev.
 
+### LLM pricing & cost estimation
+
+- The backend tracks LLM usage and an estimated cost for each save.
+- Usage (tokens, provider, model, call count) is stored in the `public.notion_saves` table: `provider`, `model`, `prompt_tokens`, `completion_tokens`, `total_tokens`, `call_count`, and `estimated_cost_usd`.
+- Model pricing is stored in `public.llm_pricing` with time‑aware rows: `provider`, `model`, per‑1K input/output USD, optional cache rates, and `effective_from`.
+
+How pricing data is populated
+
+- Prices are imported from `models.dev` and normalized to per‑1K tokens.
+- Endpoint to refresh pricing (dev only):
+
+```bash
+curl -X POST http://localhost:3000/api/llm/pricing/refresh
+```
+
+- This fetches `https://models.dev/api.json` and inserts rows into `public.llm_pricing` with `effective_from = now()`.
+- Note: `models.dev` publishes costs per 1M tokens; we divide by 1000 to store per‑1K values.
+
+How cost is calculated
+
+- After each save, the Trigger task aggregates token usage across all internal LLM calls (property extraction, optional transforms, summaries) and looks up the latest effective pricing row for `(provider, model)`.
+- Formula used:
+
+```
+estimated_cost_usd = (prompt_tokens / 1000) * input_usd_per_1k
+                   + (completion_tokens / 1000) * output_usd_per_1k
+```
+
+- Example (Gemini 2.5 Flash): models.dev shows $0.30/M input and $2.50/M output → stored as $0.0003/1K input and $0.0025/1K output.
+- With ~3.1K prompt and ~0.28K completion tokens → cost ≈ 3.1K*0.0003 + 0.28K*0.0025 ≈ $0.0016.
+
+Operational notes
+
+- Pricing can change over time. Re‑run the refresh endpoint to insert new rows with a newer `effective_from`.
+- Existing `estimated_cost_usd` values are computed at run time and not retroactively updated.
+- Quick SQL examples:
+
+```sql
+-- Total estimated cost for the last 7 days
+select coalesce(sum(estimated_cost_usd), 0) as usd
+from public.notion_saves
+where started_at >= now() - interval '7 days';
+
+-- Average cost by model
+select model, round(avg(estimated_cost_usd)::numeric, 6) as avg_usd
+from public.notion_saves
+group by 1
+order by 2 desc;
+```
+
 ## Per‑database custom prompts (Options → Utilities → List all)
 
 - Click “Edit prompt” on any database to store custom guidance (how to map fields, what to prioritize, content structure).

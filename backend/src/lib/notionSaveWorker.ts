@@ -13,6 +13,8 @@ export type NotionSavePayload = {
 	contentPrompt?: string;
 	reasoning_effort?: string;
 	verbosity?: string;
+	// Optional tracking row id in public.notion_saves
+	saveId?: string;
 };
 
 async function notionFetch(path: string, options: any = {}, token: string) {
@@ -237,7 +239,7 @@ async function materializeExternalImagesInPropsAndBlocks(db: any, props: any, bl
 	}
 }
 
-export async function runSaveToNotion(payload: NotionSavePayload): Promise<{ page: any; uploadDiagnostics: any[]; }> {
+export async function runSaveToNotion(payload: NotionSavePayload): Promise<{ page: any; uploadDiagnostics: any[]; usage?: { provider: string; model: string; prompt_tokens: number; completion_tokens: number; total_tokens: number; call_count: number; estimated_cost_usd?: number } }> {
 	const {
 		userId,
 		databaseId,
@@ -356,6 +358,7 @@ export async function runSaveToNotion(payload: NotionSavePayload): Promise<{ pag
 		throw new Error(`LLM error: ${t}`);
 	}
 	const llmJson = await llmResp.json();
+	const usagePrimary = llmJson?.usage || {};
 	const content = llmJson?.content || '';
 	const parsed = extractJsonObject(content) || (content && content.trim().startsWith('{') ? JSON.parse(content) : null);
 	if (!parsed || !parsed.properties) throw new Error('LLM did not return valid properties JSON');
@@ -614,6 +617,7 @@ export async function runSaveToNotion(payload: NotionSavePayload): Promise<{ pag
 				const tResp = await fetch(llmUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider, model, messages: transformMessages, reasoning_effort, verbosity }) });
 				if (tResp.ok) {
 					const tJson = await tResp.json();
+					const usageTransform = tJson?.usage || {};
 					const raw = tJson?.content || '';
 					let parsedBlocks: any = null;
 					const trim = typeof raw === 'string' ? raw.trim() : '';
@@ -650,6 +654,7 @@ export async function runSaveToNotion(payload: NotionSavePayload): Promise<{ pag
 				const sResp = await fetch(llmUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider, model, messages: summaryMessages, reasoning_effort, verbosity }) });
 				if (sResp.ok) {
 					const sJson = await sResp.json();
+					const usageSummary = sJson?.usage || {};
 					const raw = sJson?.content || '';
 					let arr = extractJsonObject(raw) || [];
 					if (typeof raw === 'string' && raw.trim().startsWith('[')) { try { arr = JSON.parse(raw); } catch {} }
@@ -675,7 +680,14 @@ export async function runSaveToNotion(payload: NotionSavePayload): Promise<{ pag
 		const chunk = rest.slice(i, i + 100);
 		try { await notionFetch(`/blocks/${parentId}/children`, { method: 'PATCH', body: JSON.stringify({ children: chunk }) }, notionToken); } catch {}
 	}
-	return { page: created, uploadDiagnostics };
+	// Aggregate usage across calls
+	function numberOrZero(x: any): number { const n = Number(x); return Number.isFinite(n) ? n : 0; }
+	const promptTokens = numberOrZero(usagePrimary?.prompt_tokens) + numberOrZero((globalThis as any).usageTransform?.prompt_tokens) + numberOrZero((globalThis as any).usageSummary?.prompt_tokens);
+	const completionTokens = numberOrZero(usagePrimary?.completion_tokens) + numberOrZero((globalThis as any).usageTransform?.completion_tokens) + numberOrZero((globalThis as any).usageSummary?.completion_tokens);
+	const totalTokens = numberOrZero(usagePrimary?.total_tokens) + numberOrZero((globalThis as any).usageTransform?.total_tokens) + numberOrZero((globalThis as any).usageSummary?.total_tokens);
+	const callCount = 1 + (typeof (globalThis as any).usageTransform === 'object' ? 1 : 0) + (typeof (globalThis as any).usageSummary === 'object' ? 1 : 0);
+	const usageOut = { provider, model, prompt_tokens: promptTokens, completion_tokens: completionTokens, total_tokens: totalTokens, call_count: callCount, estimated_cost_usd: undefined as number | undefined };
+	return { page: created, uploadDiagnostics, usage: usageOut };
 }
 
 

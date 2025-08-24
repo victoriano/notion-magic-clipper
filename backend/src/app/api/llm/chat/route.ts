@@ -51,7 +51,8 @@ export async function POST(req: NextRequest) {
 			}
 			const j = await resp.json();
 			const content = j?.choices?.[0]?.message?.content?.trim() || '';
-			return withCors(req, NextResponse.json({ content }));
+			const usage = j?.usage || {};
+			return withCors(req, NextResponse.json({ content, usage: { provider: 'openai', model, prompt_tokens: usage?.prompt_tokens ?? 0, completion_tokens: usage?.completion_tokens ?? 0, total_tokens: usage?.total_tokens ?? 0 } }));
 		}
 
 		// Google
@@ -75,7 +76,8 @@ export async function POST(req: NextRequest) {
 		const g = await gResp.json();
 		const parts = g?.candidates?.[0]?.content?.parts || [];
 		const out = Array.isArray(parts) ? parts.map((p: any) => p?.text || '').join('\n').trim() : '';
-		return withCors(req, NextResponse.json({ content: out }));
+		const usage = g?.usageMetadata || {};
+		return withCors(req, NextResponse.json({ content: out, usage: { provider: 'google', model, prompt_tokens: usage?.promptTokenCount ?? 0, completion_tokens: usage?.candidatesTokenCount ?? 0, total_tokens: usage?.totalTokenCount ?? 0 } }));
 	} catch (e: any) {
 		return withCors(req, NextResponse.json({ error: String(e?.message || e) }, { status: 500 }));
 	}
