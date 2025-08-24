@@ -267,6 +267,20 @@ export async function POST(req: NextRequest) {
 		const hasTrigger = Boolean(process.env.TRIGGER_SECRET_KEY) && Boolean(process.env.TRIGGER_PROJECT_ID);
 		if (hasTrigger) {
 			try {
+				// Create a save tracking row so the client can await completion
+				let saveId: string | null = null;
+				try {
+					const { data: inserted, error: insErr } = await supabaseAdmin
+						.from('notion_saves')
+						.insert({ user_id: userId, database_id: databaseId, source_url: pageContext?.url || '', status: 'queued' })
+						.select()
+						.single();
+					if (insErr) throw insErr;
+					saveId = inserted?.id || null;
+				} catch (e) {
+					// Non-fatal: continue without saveId if insert fails
+				}
+
 				const payload = {
 					userId,
 					databaseId,
@@ -279,11 +293,25 @@ export async function POST(req: NextRequest) {
 					contentPrompt,
 					reasoning_effort,
 					verbosity,
+					// Pass saveId so the worker can update the same row
+					saveId,
 				};
 				try {
 					const run = await tasks.trigger('saveToNotion', payload);
-					const stub = { object: 'page', id: 'pending', url: pageContext?.url || '', public_url: pageContext?.url || '' };
-					const res = NextResponse.json({ enqueued: true, task: 'saveToNotion', run, page: stub, uploadDiagnostics: [] }, { status: 202 });
+					// Attach run metadata to the save row if we created one
+					try {
+						if (saveId) {
+							const runId: any = (run as any)?.id || (run as any)?.run?.id || null;
+							await supabaseAdmin
+								.from('notion_saves')
+								.update({ run_id: runId || null, task_id: 'saveToNotion', status: 'queued' })
+								.eq('id', saveId)
+								.eq('user_id', userId);
+						}
+					} catch {}
+					// Return a neutral stub (no source URL) to avoid showing the original URL in the popup
+					const stub = { object: 'page', id: 'pending', url: '', public_url: '' } as const;
+					const res = NextResponse.json({ enqueued: true, task: 'saveToNotion', run, saveId, page: stub, uploadDiagnostics: [] }, { status: 202 });
 					res.headers.set('X-Trigger-Used', '1');
 					return withCors(req, res);
 				} catch (e) {

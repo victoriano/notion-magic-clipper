@@ -644,6 +644,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           throw new Error(`Backend JSON parse failed. Body: ${t.slice(0, 500)}`);
         });
         const page = json?.page;
+        const saveId = json?.saveId;
+        const enqueued = !!json?.enqueued;
         if (!page) throw new Error('No page returned');
         try {
           if (Array.isArray(json?.uploadDiagnostics) && json.uploadDiagnostics.length) {
@@ -652,12 +654,45 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             console.log('[NotionMagicClipper] UPLOAD_DIAGNOSTICS (full)', JSON.parse(JSON.stringify(json.uploadDiagnostics)));
           }
         } catch {}
-        // Record minimal recent save entry
+        // If the work is enqueued, poll the await endpoint to get the final Notion page URL
+        if (enqueued && saveId) {
+          try {
+            const baseB = await getBackendBase();
+            const awaitUrl = `${baseB}/api/clip/await?id=${encodeURIComponent(saveId)}`;
+            const deadline = Date.now() + 90_000; // up to 90s
+            let finalUrl = page?.url || page?.public_url || '';
+            while (Date.now() < deadline) {
+              await new Promise((r) => setTimeout(r, 1500));
+              const r2 = await fetch(awaitUrl, { credentials: 'include' });
+              if (!r2.ok) break;
+              const j2 = await r2.json().catch(() => ({}));
+              const save = j2?.save;
+              if (save?.status === 'succeeded') {
+                if (typeof save?.notion_page_url === 'string' && save.notion_page_url) {
+                  finalUrl = save.notion_page_url;
+                }
+                break;
+              }
+              if (save?.status === 'failed') {
+                throw new Error(save?.error || 'Background save failed');
+              }
+            }
+            try {
+              const dbTitle = '';
+              await recordRecentSave({ url: finalUrl || (page?.url || page?.public_url || ''), ts: Date.now(), databaseId, databaseTitle: dbTitle, title: '', sourceUrl: pageContext.url || '' });
+            } catch {}
+            sendResponse({ ok: true, page: { ...page, url: finalUrl || page?.url }, uploadDiagnostics: json?.uploadDiagnostics || [], saveId });
+            return;
+          } catch (e) {
+            // Fall back to returning the stub page
+          }
+        }
+        // Non-enqueued (sync path) or polling failed – return immediate page
         try {
           const dbTitle = '';
           await recordRecentSave({ url: page?.url || page?.public_url || '', ts: Date.now(), databaseId, databaseTitle: dbTitle, title: '', sourceUrl: pageContext.url || '' });
         } catch {}
-        sendResponse({ ok: true, page, uploadDiagnostics: json?.uploadDiagnostics || [] });
+        sendResponse({ ok: true, page, uploadDiagnostics: json?.uploadDiagnostics || [], saveId });
       } catch (e) {
         sendResponse({ ok: false, error: String(e.message || e) });
       }
