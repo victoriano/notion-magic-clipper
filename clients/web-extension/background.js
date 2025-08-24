@@ -88,11 +88,8 @@ async function getConfig() {
     chrome.storage.local.get(
       [
         'notionToken',
-        'openaiKey',
-        'googleApiKey',
-        'notionSearchQuery',
-        'openai_reasoning_effort',
-        'openai_verbosity',
+        'openai_reasoning_effort', // still used for backend proxy
+        'openai_verbosity',        // still used for backend proxy
         'databasePrompts',
         'databaseSettings',
         'llmProvider',
@@ -491,96 +488,7 @@ async function ensureSelectOptions(databaseId, props, token) {
   }
 }
 
-// OpenAI API helper
-async function openaiChat(messages, { model = GPT5_NANO_MODEL, temperature = 0.2, reasoning_effort = 'low', verbosity = 'low' } = {}) {
-  const { openaiKey } = await getConfig();
-  if (!openaiKey) throw new Error('Falta la API key de OpenAI. Configúrala en Opciones.');
-
-  const headers = {
-    'Authorization': `Bearer ${openaiKey}`,
-    'Content-Type': 'application/json'
-  };
-
-  // Determine parameter support based on model
-  const isGPT5 = typeof model === 'string' && /^gpt-5/.test(model);
-  const isO1Series = typeof model === 'string' && /^o1/.test(model);
-  const supportsAdjustableTemperature = !(isGPT5 || isO1Series);
-
-  // Build payload conditionally to avoid unsupported params (e.g., temperature on GPT-5/o1)
-  const payload = { model, messages };
-  if (supportsAdjustableTemperature && typeof temperature === 'number') {
-    payload.temperature = temperature;
-  }
-  if (isGPT5 && typeof reasoning_effort === 'string') {
-    payload.reasoning_effort = reasoning_effort;
-  }
-  if (isGPT5 && typeof verbosity === 'string') {
-    payload.verbosity = verbosity;
-  }
-
-  // Use Chat Completions for widest compatibility
-  const resp = await fetch(`${OPENAI_API_BASE}/chat/completions`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(payload)
-  });
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => '');
-    throw new Error(`OpenAI API ${resp.status}: ${text}`);
-  }
-  const data = await resp.json();
-  const content = data.choices?.[0]?.message?.content?.trim();
-  if (!content) throw new Error('Respuesta vacía del modelo.');
-  dbgBg('openaiChat: response chars =', content.length);
-  return content;
-}
-
-// Google Gemini helper
-async function geminiChat(messages, { model = 'gemini-2.5-flash' } = {}) {
-  const { googleApiKey } = await getConfig();
-  if (!googleApiKey) throw new Error('Falta la API key de Google AI (Gemini). Configúrala en Opciones.');
-  // Convert OpenAI-style messages to Gemini contents
-  const contents = [];
-  let systemInstruction = null;
-  for (const m of messages || []) {
-    const role = m.role === 'assistant' ? 'model' : (m.role === 'system' ? 'user' : m.role);
-    const text = typeof m.content === 'string' ? m.content : (Array.isArray(m.content) ? m.content.map((p) => (typeof p?.text === 'string' ? p.text : '')).join('\n') : '');
-    if (m.role === 'system') {
-      systemInstruction = { parts: [{ text }] };
-      continue;
-    }
-    contents.push({ role: role === 'system' ? 'user' : role, parts: [{ text }] });
-  }
-  const url = `${GOOGLE_GENAI_API_BASE}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(googleApiKey)}`;
-  const body = { contents };
-  if (systemInstruction) body.systemInstruction = systemInstruction;
-  const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => '');
-    throw new Error(`Gemini API ${resp.status}: ${text}`);
-  }
-  const data = await resp.json();
-  const parts = data?.candidates?.[0]?.content?.parts || data?.candidates?.[0]?.content?.parts || [];
-  const out = Array.isArray(parts) ? parts.map((p) => p?.text || '').join('\n').trim() : '';
-  if (!out) throw new Error('Respuesta vacía del modelo.');
-  dbgBg('geminiChat: response chars =', out.length);
-  return out;
-}
-
-// Provider-agnostic LLM helper
-async function llmChat(messages, opts = {}) {
-  const cfg = await getConfig();
-  const provider = (opts.provider || cfg.llmProvider || 'openai');
-  const model = (opts.model || cfg.llmModel || (provider === 'google' ? 'gemini-2.5-flash' : GPT5_NANO_MODEL));
-  dbgBg('llmChat: using provider/model', { provider, model });
-  if (provider === 'google') {
-    return geminiChat(messages, { model });
-  }
-  // default to OpenAI
-  const { openai_reasoning_effort, openai_verbosity } = cfg;
-  return openaiChat(messages, { model, reasoning_effort: openai_reasoning_effort || 'low', verbosity: openai_verbosity || 'low' });
-}
-
+// Note: LLM calls are proxied by backend now; local LLM helpers removed.
 // Build a prompt to map page context to Notion properties
 function buildPromptForProperties(schema, pageContext, customInstructions, { useArticle } = { useArticle: true }) {
   const { url, title, meta, selectionText, textSample, headings, listItems, shortSpans, attrTexts, images, article } = pageContext;

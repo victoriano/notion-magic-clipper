@@ -48,6 +48,96 @@ function extractJsonObject(text: string): any | null {
 	return null;
 }
 
+// --- Image materialization helpers ---
+async function startFileUpload(filename: string, token: string) {
+	const body = { mode: 'single_part', filename: filename || 'upload.bin' } as any;
+	const data = await notionFetch('/file_uploads', { method: 'POST', body: JSON.stringify(body) }, token);
+	return {
+		id: data?.id,
+		upload_url: data?.upload_url || data?.url,
+		upload_headers: data?.upload_headers || data?.headers,
+		upload_fields: data?.upload_fields || data?.fields || data?.form || data?.form_fields
+	};
+}
+
+function guessFilenameFromUrl(u: string, fallback = 'image') {
+	try { const url = new URL(u); const base = url.pathname.split('/').pop(); if (base) return base; } catch {}
+	return `${fallback}.bin`;
+}
+
+async function uploadExternalImageToNotion(imageUrl: string, token: string) {
+	try {
+		const resp = await fetch(imageUrl);
+		if (!resp.ok) throw new Error(`fetch ${resp.status}`);
+		const blob = await resp.blob();
+		if ((blob as any).size && (blob as any).size > 20 * 1024 * 1024) throw new Error('image too large');
+		let filename = guessFilenameFromUrl(imageUrl, 'image');
+		const upInit = await startFileUpload(filename, token);
+		let up;
+		if (upInit.upload_fields && typeof upInit.upload_fields === 'object') {
+			const fd = new FormData();
+			for (const [k, v] of Object.entries(upInit.upload_fields)) (fd as any).append(k, v as any);
+			const file = new File([blob], filename, { type: (blob as any).type || 'application/octet-stream' });
+			(fd as any).append('file', file);
+			const headers: any = {};
+			if (upInit.upload_headers && typeof upInit.upload_headers === 'object') {
+				for (const [k, v] of Object.entries(upInit.upload_headers)) headers[k] = v as any;
+			}
+			up = await fetch(upInit.upload_url, { method: 'POST', headers, body: fd as any });
+			if (!up.ok) throw new Error(`upload ${up.status} POST-policy`);
+		} else {
+			const headers: any = { 'Content-Type': (blob as any).type || 'application/octet-stream' };
+			if (upInit.upload_headers && typeof upInit.upload_headers === 'object') {
+				for (const [k, v] of Object.entries(upInit.upload_headers)) headers[k] = v as any;
+			}
+			up = await fetch(upInit.upload_url, { method: 'PUT', headers, body: blob as any });
+			if (!up.ok) throw new Error(`upload ${up.status} PUT`);
+		}
+		return { file_upload_id: upInit.id };
+	} catch {
+		return null;
+	}
+}
+
+async function materializeExternalImagesInPropsAndBlocks(db: any, props: any, blocks: any[], token: string, maxUploads = 6) {
+	let uploads = 0;
+	const tryUpload = async (url: string) => {
+		if (uploads >= maxUploads) return null;
+		const res = await uploadExternalImageToNotion(url, token);
+		if (res && (res as any).file_upload_id) uploads += 1;
+		return res;
+	};
+	// files properties
+	for (const [propName, def] of Object.entries(db.properties || {})) {
+		if ((def as any).type !== 'files') continue;
+		const v = (props || {})[propName as string];
+		const items = v?.files;
+		if (!Array.isArray(items) || !items.length) continue;
+		const out: any[] = [];
+		for (const it of items) {
+			if (it?.file_upload?.id || it?.file_upload?.file_upload_id) { out.push(it); continue; }
+			const ext = it?.external?.url || it?.url;
+			if (typeof ext === 'string') {
+				const up = await tryUpload(ext);
+				if (up) { const fid = (up as any).file_upload_id; out.push({ name: it?.name || 'image', file_upload: { id: fid } }); continue; }
+			}
+			if (it?.external?.url) out.push({ name: it?.name || 'image', external: { url: it.external.url } });
+			else if (it?.url) out.push({ name: 'image', external: { url: it.url } });
+		}
+		(props as any)[propName] = { files: out };
+	}
+	// image blocks
+	for (const b of Array.isArray(blocks) ? blocks : []) {
+		if (!b || b.type !== 'image') continue;
+		const ext = b.image?.external?.url || (b as any).url;
+		if (typeof ext === 'string') {
+			const up = await tryUpload(ext);
+			if (up) { const fid = (up as any).file_upload_id; b.image = { file_upload: { id: fid } }; }
+		}
+	}
+}
+// --- end helpers ---
+
 export async function POST(req: NextRequest) {
 	const userId = cookies().get('sb_user_id')?.value;
 	if (!userId) return withCors(req, NextResponse.json({ error: 'Login required' }, { status: 401 }));
@@ -147,25 +237,225 @@ export async function POST(req: NextRequest) {
 		const urlPropName = Object.entries(db.properties || {}).find(([, def]: any) => def.type === 'url')?.[0];
 		if (urlPropName && !parsed.properties[urlPropName] && pageContext.url) parsed.properties[urlPropName] = { url: pageContext.url };
 
+		// Sanitize and normalize properties to valid Notion API shapes
+		function toRichText(text: string) {
+			const content = typeof text === 'string' ? text : '';
+			return [{ type: 'text', text: { content } }];
+		}
+		function sanitizeRichTextArray(arr: any[]): any[] {
+			const out: any[] = [];
+			const MAX = 20;
+			function make(text: string, linkUrl?: string) {
+				const content = String(text || '').slice(0, 2000);
+				const base: any = { type: 'text', text: { content } };
+				if (linkUrl && typeof linkUrl === 'string') base.text.link = { url: linkUrl };
+				return base;
+			}
+			for (const it of Array.isArray(arr) ? arr : []) {
+				if (out.length >= MAX) break;
+				if (typeof it === 'string') { out.push(make(it)); continue; }
+				if (it && typeof it === 'object') {
+					if ((it as any).type === 'text' && (it as any).text?.content) { out.push(it); continue; }
+					if (typeof (it as any).plain_text === 'string') { out.push(make((it as any).plain_text, (it as any).href)); continue; }
+					if (typeof (it as any).content === 'string') { out.push(make((it as any).content)); continue; }
+				}
+			}
+			if (out.length === 0) out.push(make(''));
+			return out;
+		}
+		function normalizeValueByType(def: any, value: any): any | undefined {
+			const type = def.type;
+			if (value == null) return undefined;
+			switch (type) {
+				case 'title': {
+					if (Array.isArray(value?.title)) return { title: sanitizeRichTextArray(value.title) };
+					if (typeof value === 'string') return { title: toRichText(value) };
+					if (typeof value?.text === 'string') return { title: toRichText(value.text) };
+					if (Array.isArray(value)) return { title: sanitizeRichTextArray(value) };
+					return undefined;
+				}
+				case 'rich_text': {
+					if (Array.isArray(value?.rich_text)) return { rich_text: sanitizeRichTextArray(value.rich_text) };
+					if (typeof value === 'string') return { rich_text: toRichText(value) };
+					if (typeof value?.text === 'string') return { rich_text: toRichText(value.text) };
+					if (Array.isArray(value)) return { rich_text: sanitizeRichTextArray(value) };
+					return undefined;
+				}
+				case 'url': {
+					const url = typeof value === 'string' ? value : value?.url;
+					if (typeof url === 'string' && url.length > 0) return { url };
+					return undefined;
+				}
+				case 'files': {
+					const arr = Array.isArray(value) ? value : (Array.isArray(value?.files) ? value.files : undefined);
+					if (!Array.isArray(arr)) return undefined;
+					const files: any[] = [];
+					for (const item of arr) {
+						if (!item) continue;
+						if (typeof item === 'string') { files.push({ name: 'file', external: { url: item } }); continue; }
+						if (typeof item?.url === 'string') { files.push({ name: item.name || 'file', external: { url: item.url } }); continue; }
+						if (item.external?.url) { files.push({ name: item.name || 'file', external: { url: item.external.url } }); continue; }
+					}
+					return files.length ? { files } : undefined;
+				}
+				case 'email': {
+					const email = typeof value === 'string' ? value : value?.email;
+					if (typeof email === 'string' && email.length > 0) return { email };
+					return undefined;
+				}
+				case 'phone_number': {
+					const phone = typeof value === 'string' ? value : value?.phone_number;
+					if (typeof phone === 'string' && phone.length > 0) return { phone_number: phone };
+					return undefined;
+				}
+				case 'number': {
+					const num = typeof value === 'number' ? value : Number(value?.number ?? value);
+					if (!Number.isNaN(num)) return { number: num };
+					return undefined;
+				}
+				case 'checkbox': {
+					const bool = typeof value === 'boolean' ? value : (typeof value === 'string' ? value.toLowerCase() === 'true' : undefined);
+					if (typeof bool === 'boolean') return { checkbox: bool };
+					return undefined;
+				}
+				case 'select': {
+					const name = typeof value === 'string' ? value : value?.select?.name ?? value?.name;
+					if (typeof name === 'string' && name.trim().length > 0) return { select: { name: name.trim() } };
+					return undefined;
+				}
+				case 'multi_select': {
+					const arr = Array.isArray(value) ? value : (Array.isArray(value?.multi_select) ? value.multi_select : (typeof value === 'string' ? value.split(',') : undefined));
+					if (Array.isArray(arr)) {
+						const cleaned = arr.map((v: any) => (typeof v === 'string' ? v.trim() : v?.name)).filter((n: any) => typeof n === 'string' && n.length > 0).map((name: string) => ({ name }));
+						if (cleaned.length > 0) return { multi_select: cleaned };
+					}
+					return undefined;
+				}
+				case 'status': {
+					const name = typeof value === 'string' ? value : value?.status?.name ?? value?.name;
+					if (typeof name === 'string' && name.length > 0) return { status: { name } };
+					return undefined;
+				}
+				case 'date': {
+					if (typeof value === 'string') return { date: { start: value } };
+					if (value && typeof value === 'object') {
+						if (typeof value.date === 'string') return { date: { start: value.date } };
+						if (value.date && typeof value.date === 'object') {
+							const d: any = value.date;
+							const cleaned: any = {};
+							if (typeof d.start === 'string') cleaned.start = d.start;
+							if (typeof d.end === 'string') cleaned.end = d.end;
+							if (typeof d.time_zone === 'string') cleaned.time_zone = d.time_zone;
+							if (Object.keys(cleaned).length > 0) return { date: cleaned };
+						}
+						if (typeof value.start === 'string' || typeof value.end === 'string' || typeof value.time_zone === 'string') {
+							const cleaned: any = {};
+							if (typeof value.start === 'string') cleaned.start = value.start;
+							if (typeof value.end === 'string') cleaned.end = value.end;
+							if (typeof value.time_zone === 'string') cleaned.time_zone = value.time_zone;
+							return { date: cleaned };
+						}
+					}
+					return undefined;
+				}
+				default: return undefined;
+			}
+		}
+		function sanitizeProperties(dbObj: any, props: any): any {
+			const out: any = {};
+			const schema = dbObj.properties || {};
+			for (const [propName, def] of Object.entries(schema)) {
+				const raw = (props || {})[propName as string];
+				if (raw === undefined) continue;
+				const normalized = normalizeValueByType(def, raw);
+				if (normalized && typeof normalized === 'object' && Object.keys(normalized).length > 0) out[propName as string] = normalized;
+			}
+			return out;
+		}
+		let safeProps = sanitizeProperties(db, parsed.properties);
+		// Ensure title property exists
+		const titlePropName = Object.entries(db.properties || {}).find(([, def]: any) => def.type === 'title')?.[0];
+		if (titlePropName) {
+			const existing: any = (safeProps as any)[titlePropName];
+			const hasValidTitle = Array.isArray(existing?.title) && existing.title.length > 0;
+			if (!hasValidTitle) (safeProps as any)[titlePropName] = { title: toRichText(pageContext.title || pageContext.meta?.['og:title'] || pageContext.url || 'Untitled') };
+		}
+
+		// Ensure select/multi_select options exist (auto-create missing ones when capacity allows)
+		async function ensureSelectOptions(databaseId: string, props: any) {
+			const updates: any = {};
+			for (const [propName, def] of Object.entries(db.properties || {})) {
+				const incoming = (props as any)[propName];
+				if (!incoming) continue;
+				if (def.type === 'select' && incoming.select?.name) {
+					const existingOpts = (def as any).select?.options || [];
+					const existingNames = new Set(existingOpts.map((o: any) => o.name));
+					const desired = String(incoming.select.name).trim();
+					if (!existingNames.has(desired)) {
+						const capacity = Math.max(0, 100 - existingOpts.length);
+						if (capacity > 0) { updates[propName] = existingOpts.concat([{ name: desired, color: 'default' }]); }
+					}
+				}
+				if (def.type === 'multi_select' && Array.isArray(incoming.multi_select)) {
+					const existingOpts = (def as any).multi_select?.options || [];
+					const existingNames = new Set(existingOpts.map((o: any) => o.name));
+					const desiredNames = incoming.multi_select.map((o: any) => o.name).filter((n: any) => typeof n === 'string' && n.trim().length > 0);
+					const missing = desiredNames.filter((n: string) => !existingNames.has(n));
+					const capacity = Math.max(0, 100 - existingOpts.length);
+					const toAdd = missing.slice(0, capacity).map((n: string) => ({ name: n, color: 'default' }));
+					if (toAdd.length > 0) updates[propName] = existingOpts.concat(toAdd);
+				}
+			}
+			if (Object.keys(updates).length > 0) {
+				await notionFetch(`/databases/${databaseId}`, { method: 'PATCH', body: JSON.stringify({ properties: Object.fromEntries(Object.entries(updates).map(([k,v]) => {
+					const def: any = (db.properties as any)[k];
+					if (def.type === 'select') return [k, { select: { options: v } }];
+					if (def.type === 'multi_select') return [k, { multi_select: { options: v } }];
+					return [k, v];
+				})) }) }, notionToken);
+			}
+		}
+		await ensureSelectOptions(databaseId, safeProps);
+
 		// Prepare children blocks if requested
-		function toRichText(text: string) { return [{ type: 'text', text: { content: String(text || '') } }]; }
+		function toRichTextBlock(text: string) { return [{ type: 'text', text: { content: String(text || '') } }]; }
 		function sanitizeBlocks(rawBlocks: any[]): any[] {
 			if (!Array.isArray(rawBlocks)) return [];
 			const allowed = new Set(['paragraph','heading_1','heading_2','heading_3','bulleted_list_item','numbered_list_item','quote','image']);
+			function normalizeRichTextArray(value: any): any[] {
+				const list = Array.isArray(value) ? value : [value];
+				const out: any[] = [];
+				for (const it of list) {
+					if (typeof it === 'string') { out.push({ type: 'text', text: { content: it } }); continue; }
+					if (it && typeof it === 'object') {
+						// Proper shape
+						if (it.type === 'text' && it.text && typeof it.text.content === 'string') { out.push(it); continue; }
+						// Common loose shapes -> normalize
+						const fromPlain = typeof (it as any).plain_text === 'string' ? (it as any).plain_text : undefined;
+						const fromContent = typeof (it as any).content === 'string' ? (it as any).content : undefined;
+						const fromText = typeof (it as any).text === 'string' ? (it as any).text : undefined;
+						const chosen = fromPlain ?? fromContent ?? fromText;
+						if (typeof chosen === 'string') { out.push({ type: 'text', text: { content: chosen } }); continue; }
+					}
+				}
+				if (out.length === 0) out.push({ type: 'text', text: { content: '' } });
+				return out;
+			}
 			const out: any[] = [];
 			for (const b of rawBlocks) {
-				if (typeof b === 'string') { out.push({ object: 'block', type: 'paragraph', paragraph: { rich_text: toRichText(b) } }); continue; }
+				if (typeof b === 'string') { out.push({ object: 'block', type: 'paragraph', paragraph: { rich_text: toRichTextBlock(b) } }); continue; }
 				if (!b || typeof b !== 'object') continue;
 				const type = b.type;
 				if (!allowed.has(type)) continue;
 				if (type === 'image') {
-					const url = b?.image?.external?.url || b?.url;
+					const url = b?.image?.external?.url || (b as any).url;
 					if (typeof url === 'string' && url) { out.push({ object: 'block', type: 'image', image: { external: { url } } }); }
 					continue;
 				}
 				const field = (b as any)[type];
-				const txt = field?.rich_text || field?.text || (b as any).text || (b as any).content || '';
-				out.push({ object: 'block', type, [type]: { rich_text: Array.isArray(txt) ? txt : toRichText(txt) } });
+				const txt = field?.rich_text ?? field?.text ?? (b as any).text ?? (b as any).content ?? '';
+				const rich = normalizeRichTextArray(txt);
+				out.push({ object: 'block', type, [type]: { rich_text: rich } });
 			}
 			return out;
 		}
@@ -217,10 +507,39 @@ export async function POST(req: NextRequest) {
 					}
 				} catch {}
 			}
+			// Fallback: images + summary paragraph when we still have no children
+			if (!children || !Array.isArray(children) || children.length === 0) {
+				const imageOnly = (Array.isArray(pageContext.articleBlocks) ? sanitizeBlocks(pageContext.articleBlocks) : [])
+					.filter((b) => b && b.type === 'image')
+					.slice(0, 8);
+				let summaryBlocks: any[] = [];
+				try {
+					const contextText = String(pageContext.article?.text || pageContext.textSample || '').slice(0, 4000);
+					const summaryMessages = [
+						{ role: 'system', content: 'Return only a JSON array with a single Notion paragraph block that briefly explains why this insight matters now. Use neutral, concise language (1-2 sentences).' },
+						{ role: 'user', content: `Context:\n${contextText}` },
+						{ role: 'user', content: `Additional instructions for the paragraph:\n${contentPrompt || ''}` }
+					];
+					const sResp = await fetch(llmUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider, model, messages: summaryMessages, reasoning_effort, verbosity }) });
+					if (sResp.ok) {
+						const sJson = await sResp.json();
+						const raw = sJson?.content || '';
+						let arr = extractJsonObject(raw) || [];
+						if (typeof raw === 'string' && raw.trim().startsWith('[')) { try { arr = JSON.parse(raw); } catch {} }
+						const safe = sanitizeBlocks(Array.isArray(arr) ? arr : (arr?.children || []));
+						if (Array.isArray(safe) && safe.length) summaryBlocks = safe.slice(0, 1);
+					}
+				} catch {}
+				if (summaryBlocks.length === 0) summaryBlocks = [{ object: 'block', type: 'paragraph', paragraph: { rich_text: toRichTextBlock('Summary unavailable.') } }];
+				children = imageOnly.concat(summaryBlocks);
+			}
 		}
 
+		// Materialize external images into Notion uploads (both in blocks and files properties)
+		await materializeExternalImagesInPropsAndBlocks(db, safeProps, children, notionToken);
+
 		const firstBatch = Array.isArray(children) ? children.slice(0, 100) : [];
-		const bodyCreate: any = { parent: { database_id: databaseId }, properties: parsed.properties };
+		const bodyCreate: any = { parent: { database_id: databaseId }, properties: safeProps };
 		if (firstBatch.length > 0) bodyCreate.children = firstBatch;
 		const created = await notionFetch('/pages', { method: 'POST', body: JSON.stringify(bodyCreate) }, notionToken);
 		// Append remaining children if any

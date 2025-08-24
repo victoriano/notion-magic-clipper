@@ -153,7 +153,7 @@ async function precheck(opts = {}) {
   const pre = document.getElementById('precheck');
   const app = document.getElementById('app');
   const indicator = document.getElementById('statusIndicator');
-  const cfg = await getStorage(['notionToken', 'openaiKey', 'googleApiKey', 'llmProvider', 'llmModel', 'backendUrl', 'workspaceTokens']);
+  const cfg = await getStorage(['notionToken', 'llmProvider', 'llmModel', 'backendUrl', 'workspaceTokens']);
   const prodBackend = 'https://magic-clipper.vercel.app';
   // Decide default backend only if none is set
   if (!cfg.backendUrl) {
@@ -168,12 +168,6 @@ async function precheck(opts = {}) {
   const model = cfg.llmModel || 'gpt-5-nano';
   const tokensMap = cfg.workspaceTokens && typeof cfg.workspaceTokens === 'object' ? cfg.workspaceTokens : {};
   const hasNotion = Object.keys(tokensMap).length > 0 || !!cfg.notionToken;
-  const hasOpenAI = !!cfg.openaiKey;
-  const hasGoogle = !!cfg.googleApiKey;
-  let hasLLM = false;
-  if (provider === 'openai') hasLLM = hasOpenAI;
-  else if (provider === 'google') hasLLM = hasGoogle;
-  else hasLLM = hasOpenAI || hasGoogle; // fallback if unknown provider
   const ok = hasNotion; // account connected is sufficient to turn green
   if (indicator) {
     indicator.classList.toggle('ok', ok);
@@ -192,8 +186,6 @@ async function openTokensView() {
   const tModel = document.getElementById('tModel');
   const appView = document.getElementById('app');
   const notionInput = document.getElementById('tNotionToken');
-  const openaiInput = document.getElementById('tOpenAI');
-  const googleInput = document.getElementById('tGoogle');
   const backendInput = document.getElementById('tBackendUrl');
   const workspaceInput = document.getElementById('tWorkspaceId');
   const advancedBackendRow = document.getElementById('advancedBackendRow');
@@ -202,10 +194,8 @@ async function openTokensView() {
   const logoutBtn = document.getElementById('logoutBtn');
   const connectWorkspaceBtn = document.getElementById('connectWorkspaceBtn');
 
-  const { notionToken, openaiKey, googleApiKey, llmProvider, llmModel, backendUrl, workspaceId } = await getStorage(['notionToken', 'openaiKey', 'googleApiKey', 'llmProvider', 'llmModel', 'backendUrl', 'workspaceId']);
+  const { notionToken, llmProvider, llmModel, backendUrl, workspaceId } = await getStorage(['notionToken', 'llmProvider', 'llmModel', 'backendUrl', 'workspaceId']);
   if (notionInput) notionInput.value = notionToken || '';
-  if (openaiInput) openaiInput.value = openaiKey || '';
-  if (googleInput) googleInput.value = googleApiKey || '';
   if (backendInput) backendInput.value = (backendUrl || defaultBackendBase);
   if (workspaceInput) workspaceInput.value = workspaceId || '';
   // Hide backend + legacy token UI by default; show only if a dev flag is set
@@ -590,8 +580,6 @@ async function main() {
         notionToken: '',
         workspaceTokens: {},
         workspaceId: '',
-        openaiKey: '',
-        googleApiKey: '',
         llmProvider: 'openai',
         llmModel: 'gpt-5-nano',
         databaseSettings: {},
