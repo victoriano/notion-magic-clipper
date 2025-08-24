@@ -647,7 +647,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (!page) throw new Error('No page returned');
         try {
           if (Array.isArray(json?.uploadDiagnostics) && json.uploadDiagnostics.length) {
-            dbgBg('UPLOAD_DIAGNOSTICS', sanitizeForLog(json.uploadDiagnostics));
+            try { window.lastUploadDiagnostics = json.uploadDiagnostics; } catch {}
+            // Print full object without truncation
+            console.log('[NotionMagicClipper] UPLOAD_DIAGNOSTICS (full)', JSON.parse(JSON.stringify(json.uploadDiagnostics)));
           }
         } catch {}
         // Record minimal recent save entry

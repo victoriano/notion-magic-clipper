@@ -193,7 +193,7 @@ async function uploadExternalImageToNotion(imageUrl: string, token: string, diag
 	}
 }
 
-async function materializeExternalImagesInPropsAndBlocks(db: any, props: any, blocks: any[], token: string, maxUploads = 6, diags?: any[], refererUrl?: string) {
+async function materializeExternalImagesInPropsAndBlocks(db: any, props: any, blocks: any[], token: string, maxUploads = 24, diags?: any[], refererUrl?: string) {
 	let uploads = 0;
 	const tryUpload = async (url: string) => {
 		if (uploads >= maxUploads) return null;
@@ -227,13 +227,17 @@ async function materializeExternalImagesInPropsAndBlocks(db: any, props: any, bl
 			if (up) { const fid = (up as any).file_upload_id; b.image = { file_upload: { id: fid } }; }
 		}
 	}
-	// Drop any remaining image blocks that were not materialized to file_upload
+	// Drop only Twitter/X images that couldn't be materialized; keep other externals
 	if (Array.isArray(blocks) && blocks.length) {
 		for (let i = blocks.length - 1; i >= 0; i--) {
 			const blk: any = blocks[i];
 			if (blk && blk.type === 'image') {
 				const hasUpload = !!(blk?.image?.file_upload?.id);
-				if (!hasUpload) blocks.splice(i, 1);
+				if (!hasUpload) {
+					let host = '';
+					try { const u = new URL(blk?.image?.external?.url || ''); host = u.hostname; } catch {}
+					if (host.endsWith('twimg.com') || host.endsWith('x.com')) blocks.splice(i, 1);
+				}
 			}
 		}
 	}
@@ -659,7 +663,7 @@ export async function POST(req: NextRequest) {
 			if (!children || !Array.isArray(children) || children.length === 0) {
 				const imageOnly = (Array.isArray(pageContext.articleBlocks) ? sanitizeBlocks(pageContext.articleBlocks) : [])
 					.filter((b) => b && b.type === 'image')
-					.slice(0, 8);
+					.slice(0, 30);
 				let summaryBlocks: any[] = [];
 				try {
 					const contextText = String(pageContext.article?.text || pageContext.textSample || '').slice(0, 4000);
