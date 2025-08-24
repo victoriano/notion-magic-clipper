@@ -50,12 +50,27 @@ export const saveToNotion = task({
 					const pageId: any = (result as any)?.page?.id || null;
 					const pageUrl: any = (result as any)?.page?.url || (result as any)?.page?.public_url || null;
 					const usage = (result as any)?.usage || {};
+					function extractTitleFromPage(p: any): string | null {
+						try {
+							const props = p?.properties || {};
+							for (const [name, def] of Object.entries<any>(props)) {
+								if (def && def.type === 'title') {
+									const arr = Array.isArray(def.title) ? def.title : [];
+									const text = arr.map((r: any) => (typeof r?.plain_text === 'string' ? r.plain_text : (typeof r?.text?.content === 'string' ? r.text.content : ''))).join('').trim();
+									return text || null;
+								}
+							}
+							return null;
+						} catch { return null; }
+					}
+					const pageTitle = extractTitleFromPage((result as any)?.page);
 					await supabaseAdmin
 						.from('notion_saves')
 						.update({
 							status: 'succeeded',
 							notion_page_id: pageId,
 							notion_page_url: pageUrl,
+							title: pageTitle,
 							completed_at: new Date(),
 							prompt_tokens: usage?.prompt_tokens ?? undefined,
 							completion_tokens: usage?.completion_tokens ?? undefined,

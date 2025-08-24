@@ -816,20 +816,51 @@ async function main() {
   async function loadHistory() {
     historyStatus.textContent = '';
     historyList.innerHTML = '';
+    try {
+      const { backendUrl } = await getStorage(['backendUrl']);
+      const base = (backendUrl || 'http://localhost:3000').replace(/\/$/, '');
+      // Fetch recent rows for the logged-in user; backend endpoint supports recent=1 returning latest N
+      const resp = await fetch(`${base}/api/clip/await?recent=1`, { credentials: 'include' });
+      if (!resp.ok) throw new Error('fallback');
+      const j = await resp.json();
+      const items = Array.isArray(j?.saves) ? j.saves : [];
+      if (!items.length) { historyStatus.textContent = 'No recent saves yet.'; return; }
+      for (const it of items) {
+        const li = document.createElement('li');
+        const notionLink = document.createElement('a');
+        notionLink.href = it.notion_page_url || '#';
+        notionLink.textContent = it.title || 'Untitled';
+        notionLink.target = '_blank';
+        notionLink.rel = 'noopener noreferrer';
+        const sourceLink = document.createElement('a');
+        sourceLink.href = it.source_url || '#';
+        sourceLink.textContent = ' 🔗';
+        sourceLink.title = 'Open original page';
+        sourceLink.style.marginLeft = '6px';
+        sourceLink.target = '_blank';
+        sourceLink.rel = 'noopener noreferrer';
+        const time = document.createElement('span');
+        const d = new Date(it.completed_at || it.started_at || Date.now());
+        time.textContent = '  ·  ' + d.toLocaleString();
+        time.style.color = '#666';
+        li.appendChild(notionLink);
+        if (it.source_url) li.appendChild(sourceLink);
+        li.appendChild(time);
+        historyList.appendChild(li);
+      }
+      return;
+    } catch {}
+    // Fallback to legacy local list
     const { recentSaves } = await getStorage(['recentSaves']);
     const items = Array.isArray(recentSaves) ? recentSaves : [];
-    if (!items.length) {
-      historyStatus.textContent = 'No recent saves yet.';
-      return;
-    }
+    if (!items.length) { historyStatus.textContent = 'No recent saves yet.'; return; }
     for (const it of items) {
       const li = document.createElement('li');
       const notionLink = document.createElement('a');
       notionLink.href = it.url || '#';
-      notionLink.textContent = (it.title ? it.title + ' – ' : '') + (it.databaseTitle ? it.databaseTitle : 'Notion');
+      notionLink.textContent = it.title || 'Untitled';
       notionLink.target = '_blank';
       notionLink.rel = 'noopener noreferrer';
-
       const sourceLink = document.createElement('a');
       sourceLink.href = it.sourceUrl || '#';
       sourceLink.textContent = ' 🔗';
@@ -837,13 +868,10 @@ async function main() {
       sourceLink.style.marginLeft = '6px';
       sourceLink.target = '_blank';
       sourceLink.rel = 'noopener noreferrer';
-
       const time = document.createElement('span');
       const d = new Date(typeof it.ts === 'number' ? it.ts : Date.now());
-      const took = typeof it.durationMs === 'number' ? `  ·  ${Math.round(it.durationMs / 1000)}s` : '';
-      time.textContent = '  ·  ' + d.toLocaleString() + took;
+      time.textContent = '  ·  ' + d.toLocaleString();
       time.style.color = '#666';
-
       li.appendChild(notionLink);
       if (it.sourceUrl) li.appendChild(sourceLink);
       li.appendChild(time);

@@ -21,13 +21,24 @@ export async function GET(req: NextRequest) {
 		const { searchParams } = new URL(req.url);
 		const id = searchParams.get('id');
 		const runId = searchParams.get('run_id');
-		if (!id && !runId) return withCors(req, NextResponse.json({ error: 'Missing id or run_id' }, { status: 400 }));
+		const recent = searchParams.get('recent');
 		const userId = cookies().get('sb_user_id')?.value;
 		if (!userId) return withCors(req, NextResponse.json({ error: 'Login required' }, { status: 401 }));
 		if (!supabaseAdmin) return withCors(req, NextResponse.json({ error: 'Server misconfigured' }, { status: 500 }));
+		if (recent) {
+			const { data, error } = await supabaseAdmin
+				.from('notion_saves')
+				.select('id, status, notion_page_id, notion_page_url, error, started_at, completed_at, source_url, title')
+				.eq('user_id', userId)
+				.order('started_at', { ascending: false })
+				.limit(20);
+			if (error) return withCors(req, NextResponse.json({ error: error.message }, { status: 500 }));
+			return withCors(req, NextResponse.json({ saves: data || [] }));
+		}
+		if (!id && !runId) return withCors(req, NextResponse.json({ error: 'Missing id or run_id' }, { status: 400 }));
 		let query = supabaseAdmin
 			.from('notion_saves')
-			.select('id, user_id, status, notion_page_id, notion_page_url, error, started_at, completed_at')
+			.select('id, user_id, status, notion_page_id, notion_page_url, error, started_at, completed_at, source_url, title')
 			.eq('user_id', userId)
 			.limit(1);
 		if (id) query = query.eq('id', id);
