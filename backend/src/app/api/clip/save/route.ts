@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
+import { tasks } from '@trigger.dev/sdk';
 import { cookies } from 'next/headers';
 
 function withCors(req: NextRequest, res: NextResponse) {
@@ -261,6 +262,37 @@ export async function POST(req: NextRequest) {
 		const reasoning_effort: string | undefined = typeof body?.reasoning_effort === 'string' ? body.reasoning_effort : undefined;
 		const verbosity: string | undefined = typeof body?.verbosity === 'string' ? body.verbosity : undefined;
 		if (!databaseId || !pageContext) return withCors(req, NextResponse.json({ error: 'Missing databaseId or pageContext' }, { status: 400 }));
+
+		// If Trigger.dev is configured, enqueue the work and return immediately (asynchronous processing)
+		const hasTrigger = Boolean(process.env.TRIGGER_SECRET_KEY) && Boolean(process.env.TRIGGER_PROJECT_ID);
+		if (hasTrigger) {
+			try {
+				const payload = {
+					userId,
+					databaseId,
+					pageContext,
+					customInstructions,
+					provider,
+					model,
+					saveArticle,
+					customizeContent,
+					contentPrompt,
+					reasoning_effort,
+					verbosity,
+				};
+				try {
+					const run = await tasks.trigger('saveToNotion', payload);
+					const stub = { object: 'page', id: 'pending', url: pageContext?.url || '', public_url: pageContext?.url || '' };
+					const res = NextResponse.json({ enqueued: true, task: 'saveToNotion', run, page: stub, uploadDiagnostics: [] }, { status: 202 });
+					res.headers.set('X-Trigger-Used', '1');
+					return withCors(req, res);
+				} catch (e) {
+					console.log('[save] tasks.trigger failed, falling back to sync', e);
+				}
+			} catch (e: any) {
+				return withCors(req, NextResponse.json({ error: String(e?.message || e) }, { status: 500 }));
+			}
+		}
 
 		const { data: rows, error } = await supabaseAdmin
 			.from('notion_connections')

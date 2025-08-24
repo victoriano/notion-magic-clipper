@@ -49,3 +49,27 @@ bun run dev
 ```
 
 Open http://localhost:3000 and click "Connect Notion".
+
+## Background jobs with Trigger.dev
+
+We offload slow Notion saves to Trigger.dev to avoid Vercel timeouts. See the Quick start: [Trigger.dev Quick start](https://trigger.dev/docs/quick-start).
+
+Environment variables:
+
+- `TRIGGER_PROJECT_ID` – Trigger.dev project ID
+- `TRIGGER_API_KEY` – Secret API key used to enqueue tasks
+- `TRIGGER_API_URL` – optional, defaults to `https://api.trigger.dev`
+
+Files:
+
+- `trigger.config.ts` – CLI config, points to `src/trigger`
+- `src/trigger/saveToNotion.ts` – task definition (id: `saveToNotion`)
+- `src/lib/notionSaveWorker.ts` – shared Notion save logic
+
+Dev server for tasks:
+
+```bash
+npx trigger.dev@latest dev
+```
+
+The API route `src/app/api/clip/save/route.ts` enqueues `saveToNotion` and returns 202 when `TRIGGER_API_KEY` is present; otherwise it runs synchronously.

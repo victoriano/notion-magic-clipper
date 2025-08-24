@@ -80,6 +80,81 @@ Tokens are stored in Chrome’s `chrome.storage.local` on your machine.
 
 Switching tabs closes the popup, but saving continues in the background.
 
+## Development (backend + Trigger.dev)
+
+This repo includes a Next.js backend (`backend/`) that handles OAuth with Notion and now offloads long saves to background jobs using Trigger.dev. In dev, run the backend and load the extension in Chrome.
+
+### Prerequisites
+
+- Bun installed (backend uses Bun scripts)
+- Supabase project (URL, anon key, service role key)
+- Notion integration (Client ID/Secret) and OAuth redirect set to `http://localhost:3000/api/notion/callback`
+- Trigger.dev project (optional but recommended for async saves)
+- An LLM key (OpenAI or Google), optional in dev
+
+### Backend setup
+
+1) Create env files and fill values:
+
+- Put Trigger.dev variables in `backend/.env` so the CLI loads them.
+- Optionally also create `backend/.env.local` for Next.js (overrides), but note the Trigger.dev CLI does NOT read `.env.local`.
+
+```env
+# Base URL of your backend (used by tasks/LLM calls)
+NEXT_PUBLIC_BASE_URL=http://localhost:3000
+
+# Notion OAuth
+NOTION_CLIENT_ID=xxx
+NOTION_CLIENT_SECRET=xxx
+NOTION_REDIRECT_URI=http://localhost:3000/api/notion/callback
+
+# Supabase
+SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+SUPABASE_ANON_KEY=eyJ...
+SUPABASE_SERVICE_ROLE_KEY=eyJ...
+
+# LLM providers (optional; at least one)
+OPENAI_API_KEY=sk-...
+GOOGLE_API_KEY=AIza...
+
+# Trigger.dev
+# Required for the CLI and for server-side enqueue (tasks.trigger)
+TRIGGER_PROJECT_ID=proj_...
+TRIGGER_SECRET_KEY=tr_sec_...
+# TRIGGER_API_URL=https://api.trigger.dev  # optional override
+```
+
+Notes:
+- The Trigger.dev CLI reads `backend/.env` (not `.env.local`).
+- Next.js reads both `.env` and `.env.local` at process start; restart `bun run dev` after changes.
+
+2) Create the Supabase table and RLS policies. See the SQL in `backend/README.md`.
+
+3) Run the backend:
+
+```bash
+cd backend
+bun install
+bun run dev
+```
+
+4) Run Trigger.dev dev server (registers tasks during development). See the Quick start docs: [Trigger.dev Quick start](https://trigger.dev/docs/quick-start).
+
+```bash
+cd backend
+npx trigger.dev@latest dev --project-ref "$TRIGGER_PROJECT_ID"
+```
+
+5) In your browser, open `http://localhost:3000` and sign in, then click “Connect Notion” to link a workspace.
+
+### Extension in dev
+
+1) Load the extension (unpacked) as described below in “Installation (developer mode)”.
+
+2) In the extension Options, set the backend URL to `http://localhost:3000` (if available), or it will use the configured default.
+
+3) Use the popup to save pages. When `TRIGGER_SECRET_KEY` is set (and `TRIGGER_PROJECT_ID`), the backend enqueues the save and returns `202` immediately; the page is created in the background and you can monitor runs in Trigger.dev.
+
 ## Per‑database custom prompts (Options → Utilities → List all)
 
 - Click “Edit prompt” on any database to store custom guidance (how to map fields, what to prioritize, content structure).
