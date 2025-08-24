@@ -121,8 +121,6 @@ async function materializeExternalImagesInPropsAndBlocks(db: any, props: any, bl
 				const up = await tryUpload(ext);
 				if (up) { const fid = (up as any).file_upload_id; out.push({ name: it?.name || 'image', file_upload: { id: fid } }); continue; }
 			}
-			if (it?.external?.url) out.push({ name: it?.name || 'image', external: { url: it.external.url } });
-			else if (it?.url) out.push({ name: 'image', external: { url: it.url } });
 		}
 		(props as any)[propName] = { files: out };
 	}
@@ -133,6 +131,16 @@ async function materializeExternalImagesInPropsAndBlocks(db: any, props: any, bl
 		if (typeof ext === 'string') {
 			const up = await tryUpload(ext);
 			if (up) { const fid = (up as any).file_upload_id; b.image = { file_upload: { id: fid } }; }
+		}
+	}
+	// Drop any remaining image blocks that were not materialized to file_upload
+	if (Array.isArray(blocks) && blocks.length) {
+		for (let i = blocks.length - 1; i >= 0; i--) {
+			const blk: any = blocks[i];
+			if (blk && blk.type === 'image') {
+				const hasUpload = !!(blk?.image?.file_upload?.id);
+				if (!hasUpload) blocks.splice(i, 1);
+			}
 		}
 	}
 }
@@ -221,7 +229,6 @@ export async function POST(req: NextRequest) {
 					'You are an assistant that generates Notion PROPERTIES only from a database schema and page context.',
 					'Return only VALID JSON shaped as { "properties": { ... } } (do NOT include "children").',
 					'- "properties": must use the exact Notion API structure and respect the provided schema types.',
-					'- Title rules: The "title" property is MANDATORY and must be a strong, source-derived headline or entity name. Never return placeholders or generic values such as "Untitled", "New Page", "No title", "Home", or an empty string. Prefer the article title or first H1/H2; if unavailable, use meta og:title/twitter:title; otherwise derive from the URL slug by turning hyphen/underscore-separated words into a clean title. Remove site/section names, sources, categories, bylines, prefixes/suffixes, emojis, quotes, URLs, and separators like "|" or "/". Keep it concise (3–80 characters), Title Case when appropriate, and trim trailing punctuation.'
 					].join(' ')
 				},
 				{
@@ -230,8 +237,8 @@ export async function POST(req: NextRequest) {
 					`Database schema (properties):\n${schemaStr}`,
 					`\nPage context:\n${contextStr}`,
 					'\n\nInstructions:',
-					'- Fill as many properties as possible based on the context.',
-						'- The "title" property is REQUIRED. Compose the best possible title using content signals in this priority: article.title or H1 > H2 > og:title/twitter:title > URL slug. Do NOT include site names, categories, or sources; never output placeholders like "Untitled" or "New Page". Use concise Title Case, 3–80 characters, no emojis, no quotes, and avoid separators like "|" or "/". If the database suggests an entity type (people, companies, movies, recipes, etc.), set the title to that entity\'s clean name.',
+						'- Fill as many properties as possible based on the context.',
+						'- Title rules: The "title" property is MANDATORY and must be a strong, source-derived headline or entity name. Never return placeholders or generic values such as "Untitled", "New Page", "No title", "Home", or an empty string. Prefer the article title or first H1/H2; if unavailable, use meta og:title/twitter:title; otherwise derive from the URL slug by turning hyphen/underscore-separated words into a clean title. Remove site names (like IMDB, Wikipedia, etc.) and section names of the page, sources, categories, bylines, prefixes/suffixes, emojis, quotes, URLs, and separators like "|" or "/". Keep it concise (3–80 characters), Title Case when appropriate, and trim trailing punctuation.',
 						'- For select/multi_select: use existing options by exact name. Do NOT create new options by default. Only propose new options if the custom database instructions explicitly allow creating options. If no clear match exists and creation is not allowed, omit the property.',
 						'- If a property name suggests an image (e.g., "Poster", "Cover", "Thumbnail", "Artwork", "Image", "Screenshot") and the page context contains an image URL (e.g., og:image or twitter:image), prefer filling that property with the image URL. If the database uses a files property, use the Notion files property shape with an external URL. Optionally, also add an image block to children using the same URL.',
 						'- When choosing among multiple images, prefer medium-to-large content images (avoid tiny icons/sprites). As a heuristic, prioritize images where width or height ≥ 256px and de-prioritize those < 64px. Use the collected image context (alt text, nearest heading, parent text, classes, and any width/height or rendered sizes) to decide.',
