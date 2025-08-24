@@ -49,8 +49,25 @@ function extractJsonObject(text: string): any | null {
 }
 
 // --- Image materialization helpers ---
-async function startFileUpload(filename: string, token: string) {
-	const body = { mode: 'single_part', filename: filename || 'upload.bin' } as any;
+function redactUrl(u: string) {
+	try { const x = new URL(u); x.search = ''; return x.href; } catch { return String(u).split('?')[0]; }
+}
+function buildImageFetchHeaders(imageUrl: string, refererUrl?: string): Record<string,string> {
+	const headers: Record<string,string> = {
+		'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+		'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+		'Accept-Language': 'en-US,en;q=0.9'
+	};
+	try {
+		const u = new URL(imageUrl);
+		if (u.hostname.endsWith('x.com') || u.hostname.endsWith('twimg.com')) headers['Referer'] = 'https://x.com/';
+		else if (refererUrl) headers['Referer'] = refererUrl;
+	} catch {}
+	return headers;
+}
+async function startFileUpload(filename: string, token: string, contentType?: string) {
+	const body: any = { mode: 'single_part', filename: filename || 'upload.bin' };
+	if (contentType && typeof contentType === 'string') body.content_type = contentType;
 	const data = await notionFetch('/file_uploads', { method: 'POST', body: JSON.stringify(body) }, token);
 	return {
 		id: data?.id,
@@ -65,15 +82,55 @@ function guessFilenameFromUrl(u: string, fallback = 'image') {
 	return `${fallback}.bin`;
 }
 
-async function uploadExternalImageToNotion(imageUrl: string, token: string) {
+async function uploadExternalImageToNotion(imageUrl: string, token: string, diags?: any[], refererUrl?: string) {
 	try {
-		const resp = await fetch(imageUrl);
-		if (!resp.ok) throw new Error(`fetch ${resp.status}`);
+		const diagBase: any = { url: redactUrl(imageUrl) };
+		let resp: any;
+		try {
+			resp = await fetch(imageUrl, { headers: buildImageFetchHeaders(imageUrl, refererUrl) } as any);
+			if (!resp.ok) {
+				if (Array.isArray(diags)) diags.push({ ...diagBase, step: 'fetch', ok: false, status: resp.status, statusText: resp.statusText });
+				throw new Error(`fetch ${resp.status}`);
+			}
+		} catch (e: any) {
+			if (Array.isArray(diags)) diags.push({ ...diagBase, step: 'fetch', ok: false, error: String(e?.message || e) });
+			throw e;
+		}
 		const blob = await resp.blob();
-		if ((blob as any).size && (blob as any).size > 20 * 1024 * 1024) throw new Error('image too large');
+		const size = Number((blob as any).size || 0);
+		const type = String((blob as any).type || '');
+		if (Array.isArray(diags)) diags.push({ ...diagBase, step: 'fetched', ok: true, size, type });
+		if (size && size > 20 * 1024 * 1024) {
+			if (Array.isArray(diags)) diags.push({ ...diagBase, step: 'guard', ok: false, reason: 'image too large (>20MB)' });
+			throw new Error('image too large');
+		}
+		function extensionForMime(mime: string): string | null {
+			const m = (mime || '').toLowerCase();
+			if (m === 'image/jpeg' || m === 'image/jpg') return '.jpg';
+			if (m === 'image/png') return '.png';
+			if (m === 'image/webp') return '.webp';
+			if (m === 'image/gif') return '.gif';
+			if (m === 'image/svg+xml') return '.svg';
+			if (m === 'image/heic') return '.heic';
+			if (m === 'image/heif') return '.heif';
+			return null;
+		}
 		let filename = guessFilenameFromUrl(imageUrl, 'image');
-		const upInit = await startFileUpload(filename, token);
-		let up;
+		const mimeExt = extensionForMime(type) || '.bin';
+		if (!/\.[A-Za-z0-9]+$/.test(filename)) filename += mimeExt;
+		else {
+			const currentExt = filename.slice(filename.lastIndexOf('.'));
+			if (mimeExt && currentExt.toLowerCase() !== mimeExt) filename = filename.replace(/\.[A-Za-z0-9]+$/, mimeExt);
+		}
+		let upInit;
+		try {
+			upInit = await startFileUpload(filename, token, type || undefined);
+			if (Array.isArray(diags)) diags.push({ ...diagBase, step: 'start_file_upload', ok: true, file_upload_id: upInit?.id });
+		} catch (e: any) {
+			if (Array.isArray(diags)) diags.push({ ...diagBase, step: 'start_file_upload', ok: false, error: String(e?.message || e) });
+			throw e;
+		}
+		let up: any;
 		if (upInit.upload_fields && typeof upInit.upload_fields === 'object') {
 			const fd = new FormData();
 			for (const [k, v] of Object.entries(upInit.upload_fields)) (fd as any).append(k, v as any);
@@ -84,14 +141,51 @@ async function uploadExternalImageToNotion(imageUrl: string, token: string) {
 				for (const [k, v] of Object.entries(upInit.upload_headers)) headers[k] = v as any;
 			}
 			up = await fetch(upInit.upload_url, { method: 'POST', headers, body: fd as any });
-			if (!up.ok) throw new Error(`upload ${up.status} POST-policy`);
-		} else {
-			const headers: any = { 'Content-Type': (blob as any).type || 'application/octet-stream' };
-			if (upInit.upload_headers && typeof upInit.upload_headers === 'object') {
-				for (const [k, v] of Object.entries(upInit.upload_headers)) headers[k] = v as any;
+			if (!up.ok) {
+				const body = await up.text().catch(() => '');
+				if (Array.isArray(diags)) diags.push({ ...diagBase, step: 'upload', method: 'POST', ok: false, status: up.status, body: String(body).slice(0, 500) });
+				throw new Error(`upload ${up.status} POST-policy`);
 			}
-			up = await fetch(upInit.upload_url, { method: 'PUT', headers, body: blob as any });
-			if (!up.ok) throw new Error(`upload ${up.status} PUT`);
+			if (Array.isArray(diags)) diags.push({ ...diagBase, step: 'upload', method: 'POST', ok: true, status: up.status });
+		} else {
+			let targetHost = '';
+			try { targetHost = new URL(upInit.upload_url).hostname; } catch {}
+			if (targetHost.endsWith('notion.com')) {
+				// Notion direct upload endpoint expects multipart/form-data with 'file' and auth headers
+				const fd = new FormData();
+				const file = new File([blob], filename, { type: (blob as any).type || 'application/octet-stream' });
+				(fd as any).append('file', file);
+				const postHeaders: any = {};
+				if (upInit.upload_headers && typeof upInit.upload_headers === 'object') {
+					for (const [k, v] of Object.entries(upInit.upload_headers)) {
+						// Do not override Content-Type for multipart
+						if (String(k).toLowerCase() === 'content-type') continue;
+						postHeaders[k] = v as any;
+					}
+				}
+				// Ensure auth + version headers are present
+				postHeaders['Authorization'] = `Bearer ${token}`;
+				postHeaders['Notion-Version'] = '2022-06-28';
+				up = await fetch(upInit.upload_url, { method: 'POST', headers: postHeaders, body: fd as any });
+				if (!up.ok) {
+					const body = await up.text().catch(() => '');
+					if (Array.isArray(diags)) diags.push({ ...diagBase, step: 'upload', method: 'POST-notion', ok: false, status: up.status, body: String(body).slice(0, 500) });
+					throw new Error(`upload ${up.status} POST-notion`);
+				}
+				if (Array.isArray(diags)) diags.push({ ...diagBase, step: 'upload', method: 'POST-notion', ok: true, status: up.status });
+			} else {
+				const headers: any = { 'Content-Type': (blob as any).type || 'application/octet-stream' };
+				if (upInit.upload_headers && typeof upInit.upload_headers === 'object') {
+					for (const [k, v] of Object.entries(upInit.upload_headers)) headers[k] = v as any;
+				}
+				up = await fetch(upInit.upload_url, { method: 'PUT', headers, body: blob as any });
+				if (!up.ok) {
+					const body = await up.text().catch(() => '');
+					if (Array.isArray(diags)) diags.push({ ...diagBase, step: 'upload', method: 'PUT', ok: false, status: up.status, body: String(body).slice(0, 500) });
+					throw new Error(`upload ${up.status} PUT`);
+				}
+				if (Array.isArray(diags)) diags.push({ ...diagBase, step: 'upload', method: 'PUT', ok: true, status: up.status });
+			}
 		}
 		return { file_upload_id: upInit.id };
 	} catch {
@@ -99,11 +193,11 @@ async function uploadExternalImageToNotion(imageUrl: string, token: string) {
 	}
 }
 
-async function materializeExternalImagesInPropsAndBlocks(db: any, props: any, blocks: any[], token: string, maxUploads = 6) {
+async function materializeExternalImagesInPropsAndBlocks(db: any, props: any, blocks: any[], token: string, maxUploads = 6, diags?: any[], refererUrl?: string) {
 	let uploads = 0;
 	const tryUpload = async (url: string) => {
 		if (uploads >= maxUploads) return null;
-		const res = await uploadExternalImageToNotion(url, token);
+		const res = await uploadExternalImageToNotion(url, token, diags, refererUrl);
 		if (res && (res as any).file_upload_id) uploads += 1;
 		return res;
 	};
@@ -590,7 +684,8 @@ export async function POST(req: NextRequest) {
 		}
 
 		// Materialize external images into Notion uploads (both in blocks and files properties)
-		await materializeExternalImagesInPropsAndBlocks(db, safeProps, children, notionToken);
+		const uploadDiagnostics: any[] = [];
+		await materializeExternalImagesInPropsAndBlocks(db, safeProps, children, notionToken, 6, uploadDiagnostics, pageContext?.url);
 
 		const firstBatch = Array.isArray(children) ? children.slice(0, 100) : [];
 		const bodyCreate: any = { parent: { database_id: databaseId }, properties: safeProps };
@@ -603,7 +698,7 @@ export async function POST(req: NextRequest) {
 			const chunk = rest.slice(i, i + 100);
 			try { await notionFetch(`/blocks/${parentId}/children`, { method: 'PATCH', body: JSON.stringify({ children: chunk }) }, notionToken); } catch {}
 		}
-		return withCors(req, NextResponse.json({ page: created }));
+		return withCors(req, NextResponse.json({ page: created, uploadDiagnostics }));
 	} catch (e: any) {
 		return withCors(req, NextResponse.json({ error: String(e?.message || e) }, { status: 500 }));
 	}

@@ -645,12 +645,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         });
         const page = json?.page;
         if (!page) throw new Error('No page returned');
+        try {
+          if (Array.isArray(json?.uploadDiagnostics) && json.uploadDiagnostics.length) {
+            dbgBg('UPLOAD_DIAGNOSTICS', sanitizeForLog(json.uploadDiagnostics));
+          }
+        } catch {}
         // Record minimal recent save entry
         try {
           const dbTitle = '';
           await recordRecentSave({ url: page?.url || page?.public_url || '', ts: Date.now(), databaseId, databaseTitle: dbTitle, title: '', sourceUrl: pageContext.url || '' });
         } catch {}
-        sendResponse({ ok: true, page });
+        sendResponse({ ok: true, page, uploadDiagnostics: json?.uploadDiagnostics || [] });
       } catch (e) {
         sendResponse({ ok: false, error: String(e.message || e) });
       }
