@@ -127,6 +127,7 @@ TRIGGER_SECRET_KEY=tr_sec_...
 Notes:
 - The Trigger.dev CLI reads `backend/.env` (not `.env.local`).
 - Next.js reads both `.env` and `.env.local` at process start; restart `bun run dev` after changes.
+- In local development, set `NEXT_PUBLIC_BASE_URL` to `http://localhost:3000`. On Vercel, set `NEXT_PUBLIC_BASE_URL` to your deployed URL (for example, `https://YOUR_APP.vercel.app`) in Project Settings → Environment Variables. Trigger.dev tasks use this value to call your backend (e.g., `/api/llm/chat`). A mismatch can cause errors like “Server missing OPENAI_API_KEY” if the task calls the wrong environment.
 
 2) Create the Supabase table and RLS policies. See the SQL in `backend/README.md`.
 
