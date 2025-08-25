@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Notion Magic Clipper",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Notion Magic Clipper: Clip the web to Notion with a bit of magic ✨",
   "permissions": [
     "storage",
