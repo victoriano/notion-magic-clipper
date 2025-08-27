@@ -103,6 +103,10 @@ async function getConfig() {
   });
 }
 
+function setStorage(obj) {
+  return new Promise((resolve) => chrome.storage.local.set(obj, resolve));
+}
+
 // Notion API helpers
 async function notionFetch(path, options = {}, tokenOverride) {
   const { notionToken } = await getConfig();
@@ -512,12 +516,44 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       try {
         dbgBg('LIST_DATABASES: query =', message.query);
         const { notionSearchQuery } = await getConfig();
+        const cached = await new Promise((resolve) => {
+          chrome.storage.local.get(['dbIndexCache'], (res) => resolve(res?.dbIndexCache || {}));
+        });
         const base = await getBackendBase();
-        const url = `${base}/api/databases/search?q=${encodeURIComponent(message.query ?? notionSearchQuery ?? '')}`;
+        const params = new URLSearchParams();
+        if (cached?.version) params.set('version', String(cached.version));
+        if (message?.query ?? notionSearchQuery) params.set('q', String(message.query ?? notionSearchQuery));
+        const url = `${base}/api/databases/search${params.toString() ? `?${params.toString()}` : ''}`;
+        try {
+          dbgBg('DB_INDEX_REQUEST', { url, cachedVersion: cached?.version || null });
+        } catch {}
         const resp = await fetch(url, { credentials: 'include' });
+        if (resp.status === 304) {
+          const items = Array.isArray(cached?.items) ? cached.items : [];
+          try { dbgBg('DB_INDEX_CACHE_HIT', { version: cached?.version || null, count: items.length }); } catch {}
+          sendResponse({ ok: true, databases: items, version: cached?.version || null, stale: false, fromCache: true });
+          return;
+        }
         if (!resp.ok) throw new Error(`Backend ${resp.status}`);
         const data = await resp.json();
         const bases = Array.isArray(data?.databases) ? data.databases : [];
+        // Fetch workspace names to annotate databases
+        let wsMap = {};
+        try {
+          const wsResp = await fetch(`${base}/api/notion/workspaces`, { credentials: 'include' });
+          if (wsResp.ok) {
+            const wsJson = await wsResp.json();
+            const arr = Array.isArray(wsJson?.workspaces) ? wsJson.workspaces : [];
+            wsMap = arr.reduce((acc, w) => { if (w?.workspace_id) acc[w.workspace_id] = w.workspace_name || ''; return acc; }, {});
+          }
+        } catch {}
+        const annotated = bases.map((d) => ({ ...d, workspaceName: (d.workspaceId && wsMap[d.workspaceId]) ? wsMap[d.workspaceId] : '' }));
+        // Persist cache
+        try {
+          await setStorage({ dbIndexCache: { items: annotated, version: data?.version || null, ts: Date.now() } });
+          dbgBg('DB_INDEX_CACHE_UPDATED', { version: data?.version || null, count: bases.length, stale: !!data?.stale });
+        } catch {}
+        // Track db ids → workspace (unknown for now)
         try {
           const map = {};
           if (Array.isArray(bases)) {
@@ -526,9 +562,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }
           }
           const prev = await getConfig();
-          await set({ dbWorkspaceMap: { ...(prev.dbWorkspaceMap || {}), ...map } });
+          await setStorage({ dbWorkspaceMap: { ...(prev.dbWorkspaceMap || {}), ...map } });
         } catch {}
-        sendResponse({ ok: true, databases: bases });
+        try { dbgBg('DB_INDEX_FRESH', { version: data?.version || null, count: bases.length, stale: !!data?.stale }); } catch {}
+        sendResponse({ ok: true, databases: annotated, version: data?.version || null, stale: !!data?.stale, fromCache: false });
+      } catch (e) {
+        try { dbgBg('DB_INDEX_ERROR', String(e?.message || e)); } catch {}
+        sendResponse({ ok: false, error: String(e.message || e) });
+      }
+      return;
+    }
+
+    if (message?.type === 'REINDEX_DATABASES') {
+      try {
+        const base = await getBackendBase();
+        const url = `${base}/api/databases/reindex`;
+        try { dbgBg('DB_INDEX_REINDEX_REQUEST', { url }); } catch {}
+        const resp = await fetch(url, { method: 'POST', credentials: 'include' });
+        if (!resp.ok) throw new Error(`Backend ${resp.status}`);
+        const j = await resp.json().catch(() => ({}));
+        try { dbgBg('DB_INDEX_REINDEX_RESPONSE', { status: resp.status, enqueued: !!j?.enqueued }); } catch {}
+        sendResponse({ ok: true, enqueued: !!j?.enqueued });
       } catch (e) {
         sendResponse({ ok: false, error: String(e.message || e) });
       }
