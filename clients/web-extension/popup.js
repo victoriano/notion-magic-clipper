@@ -66,8 +66,21 @@ function renderDbList(items) {
     row.setAttribute('role', 'option');
     row.dataset.id = db.id;
     const emoji = db.iconEmoji || '';
-    const left = document.createElement('span');
-    left.textContent = (emoji ? `${emoji} ` : '') + db.title;
+    const left = document.createElement('div');
+    left.style.display = 'flex';
+    left.style.flexDirection = 'column';
+    const title = document.createElement('span');
+    title.textContent = (emoji ? `${emoji} ` : '') + db.title;
+    left.appendChild(title);
+    if (db.workspaceName) {
+      const sub = document.createElement('span');
+      sub.textContent = db.workspaceName;
+      sub.style.fontSize = '12px';
+      sub.style.color = '#6b7280';
+      sub.style.lineHeight = '1.2';
+      sub.style.marginTop = '2px';
+      left.appendChild(sub);
+    }
     const check = document.createElement('span');
     check.textContent = '✓';
     check.className = 'cbx-check';
@@ -315,6 +328,14 @@ async function listDatabases(query) {
     if (trigger) { trigger.disabled = true; trigger.setAttribute('aria-busy', 'true'); }
   } catch {}
   const res = await chrome.runtime.sendMessage({ type: 'LIST_DATABASES', query });
+  
+  // If server indicates stale, optionally kick a manual reindex once
+  try {
+    if (res?.ok && res?.stale) {
+      // Fire and forget; user can also trigger from UI when added
+      chrome.runtime.sendMessage({ type: 'REINDEX_DATABASES' }).catch(() => {});
+    }
+  } catch {}
   if (!res?.ok) {
     const err = res?.error || '';
     if (/Missing Notion token/i.test(err)) {
@@ -338,7 +359,7 @@ async function listDatabases(query) {
       if (label) label.textContent = 'Select database...';
       if (trigger) { trigger.disabled = false; trigger.removeAttribute('aria-busy'); }
     } catch {}
-    return [];
+    return { items: [], fromCache: false, version: null, stale: false };
   }
   if (status) status.textContent = '';
   // Clear loading state
@@ -346,7 +367,7 @@ async function listDatabases(query) {
     const { trigger } = getDbElements();
     if (trigger) { trigger.disabled = false; trigger.removeAttribute('aria-busy'); }
   } catch {}
-  return res.databases;
+  return { items: res.databases || [], fromCache: !!res.fromCache, version: res.version || null, stale: !!res.stale };
 }
 
 function orderDatabasesByRecentUsage(list, recentSaves, lastDatabaseId) {
@@ -372,62 +393,43 @@ function orderDatabasesByRecentUsage(list, recentSaves, lastDatabaseId) {
 
 async function loadDatabases() {
   console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Loading databases…`);
-  const stored = await getStorage(['recentSaves', 'lastDatabaseId', 'backendUrl', 'workspaceTokens']);
-  const backendBase = (stored.backendUrl || defaultBackendBase).replace(/\/$/, '');
-  let tokensMap = stored.workspaceTokens && typeof stored.workspaceTokens === 'object' ? stored.workspaceTokens : {};
-  if (!Object.keys(tokensMap).length) {
-    try {
-      const res = await fetch(`${backendBase}/api/notion/workspaces`, { credentials: 'include' });
-      if (res.ok) {
-        const data = await res.json();
-        const list = Array.isArray(data.workspaces) ? data.workspaces : [];
-        const entries = await Promise.all(list.map(async (w) => {
-          try {
-            const r = await fetch(`${backendBase}/api/notion/token?workspace_id=${encodeURIComponent(w.workspace_id)}`, { credentials: 'include' });
-            if (!r.ok) throw new Error('token');
-            const j = await r.json();
-            return [w.workspace_id, j.access_token];
-          } catch { return null; }
-        }));
-        tokensMap = entries.filter(Boolean).reduce((acc, [id, tok]) => { acc[id] = tok; return acc; }, {});
-        if (Object.keys(tokensMap).length) await setStorage({ workspaceTokens: tokensMap });
-      }
-    } catch {}
-  }
-
-  let merged = [];
-  const tokenValues = Object.values(tokensMap);
-  if (!tokenValues.length) {
-    merged = await listDatabases('');
-  } else {
-    const perWorkspace = await Promise.all(tokenValues.map(async (tok) => {
-      try {
-        const body = { query: '', filter: { property: 'object', value: 'database' }, sort: { direction: 'ascending', timestamp: 'last_edited_time' } };
-        const resp = await fetch('https://api.notion.com/v1/search', { method: 'POST', headers: { 'Authorization': `Bearer ${tok}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-        if (!resp.ok) throw new Error('notion');
-        const data = await resp.json();
-        const results = (data.results || []).map((item) => {
-          const title = (item.title || []).map((t) => t.plain_text).join('') || '(Sin título)';
-          const iconEmoji = item?.icon?.type === 'emoji' ? item.icon.emoji : undefined;
-          const url = item?.url || `https://www.notion.so/${String(item?.id || '').replace(/-/g, '')}`;
-          return { id: item.id, title, iconEmoji, url };
-        });
-        return results;
-      } catch { return []; }
-    }));
-    const byId = new Map();
-    for (const list of perWorkspace) { for (const db of list) { if (!byId.has(db.id)) byId.set(db.id, db); } }
-    merged = Array.from(byId.values());
-  }
-  dbList = Array.isArray(merged) ? merged.slice() : [];
+  const stored = await getStorage(['recentSaves', 'lastDatabaseId']);
+  const result = await listDatabases('');
+  const merged = Array.isArray(result?.items) ? result.items : [];
+  dbList = merged.slice();
+  
   // Order by recent usage; boost lastDatabaseId
   dbList = orderDatabasesByRecentUsage(dbList, stored.recentSaves || [], stored.lastDatabaseId || '');
   dbFiltered = dbList.slice();
   renderDbList(dbFiltered);
   attachComboboxHandlers();
+  // Options page refresh button
+  try {
+    const refreshBtn = document.getElementById('dbIndexRefresh');
+    if (refreshBtn) refreshBtn.addEventListener('click', async () => {
+      const status = document.getElementById('tokensStatus');
+      if (status) { status.textContent = 'Refreshing databases…'; status.classList.remove('success'); }
+      try {
+        const r = await chrome.runtime.sendMessage({ type: 'REINDEX_DATABASES' });
+        if (!r?.ok) throw new Error(r?.error || 'Failed to refresh');
+        if (status) { status.textContent = 'Refresh enqueued ✓'; status.classList.add('success'); }
+        setTimeout(async () => {
+          const result2 = await listDatabases('');
+          dbList = Array.isArray(result2?.items) ? result2.items : [];
+          dbFiltered = dbList.slice();
+          renderDbList(dbFiltered);
+          const pre2 = (dbSelectedId && dbList.find((d) => d.id === dbSelectedId)) ? dbSelectedId : (dbList[0]?.id || '');
+          setSelectedDb(pre2);
+        }, 600);
+      } catch (e) {
+        if (status) status.textContent = String(e?.message || e);
+      }
+    });
+  } catch {}
   // Preselect last used or first
   const pre = stored.lastDatabaseId && dbList.find((d) => d.id === stored.lastDatabaseId) ? stored.lastDatabaseId : (dbList[0]?.id || '');
   setSelectedDb(pre);
+  
   // Restore label if nothing selected
   if (!pre) {
     try { const { label } = getDbElements(); if (label) label.textContent = 'Select database...'; } catch {}

@@ -234,6 +234,28 @@
         </div>
         <hr class="divider" />
         <div class="row" style="margin-top:8px">
+          <button id="dbIndexRefresh" class="btn btn-ghost" style="width:auto; display:inline-flex; align-items:center; gap:6px">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width:18px;height:18px">
+              <polyline points="23 4 23 10 17 10"/>
+              <polyline points="1 20 1 14 7 14"/>
+              <path d="M3.51 9a9 9 0 0 1 14.13-3.36L23 10M1 14l5.36 4.36A9 9 0 0 0 20.49 15"/>
+            </svg>
+            Refresh databases
+          </button>
+        </div>
+        <div class="row" style="margin-top:6px">
+          <button id="tokensClear" class="btn btn-ghost" style="width:auto; display:inline-flex; align-items:center; gap:6px" title="Temporarily for testing">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width:18px;height:18px">
+              <polyline points="3 6 5 6 21 6"/>
+              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+              <path d="M10 11v6"/>
+              <path d="M14 11v6"/>
+              <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+            </svg>
+            Clear local data
+          </button>
+        </div>
+        <div class="row" style="margin-top:6px">
           <button id="openUntitled" class="btn btn-ghost" style="width:auto; display:inline-flex; align-items:center; gap:6px">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width:18px;height:18px">
               <circle cx="11" cy="11" r="8"/>
@@ -255,7 +277,6 @@
         <div class="row" style="margin-top:8px">
           <button id="tokensBack" class="btn">← Back</button>
           <button id="tokensSave" class="btn btn-primary" style="width:auto">Save</button>
-          <button id="tokensClear" class="btn btn-outline" style="width:auto" title="Temporarily for testing">Clear local data</button>
         </div>
         <div id="tokensStatus"></div>
         
