@@ -414,32 +414,24 @@ async function loadDatabases() {
   dbFiltered = dbList.slice();
   renderDbList(dbFiltered);
   attachComboboxHandlers();
-  // Hook: manual refresh button
+  // Options page refresh button
   try {
-    const refreshBtn = document.getElementById('dbComboRefresh');
+    const refreshBtn = document.getElementById('dbIndexRefresh');
     if (refreshBtn) refreshBtn.addEventListener('click', async () => {
-      const status = document.getElementById('status');
-      if (status) status.textContent = 'Refreshing…';
+      const status = document.getElementById('tokensStatus');
+      if (status) { status.textContent = 'Refreshing databases…'; status.classList.remove('success'); }
       try {
-        console.log('[NotionMagicClipper][Popup] Triggering reindex…');
         const r = await chrome.runtime.sendMessage({ type: 'REINDEX_DATABASES' });
-        console.log('[NotionMagicClipper][Popup] Reindex response', { ok: !!r?.ok, enqueued: !!r?.enqueued });
         if (!r?.ok) throw new Error(r?.error || 'Failed to refresh');
-        // After a short delay, re-fetch list
+        if (status) { status.textContent = 'Refresh enqueued ✓'; status.classList.add('success'); }
         setTimeout(async () => {
-          console.log('[NotionMagicClipper][Popup] Re-fetching databases after reindex…');
           const result2 = await listDatabases('');
           dbList = Array.isArray(result2?.items) ? result2.items : [];
           dbFiltered = dbList.slice();
           renderDbList(dbFiltered);
-          // Keep selection if still present, otherwise pick first
           const pre2 = (dbSelectedId && dbList.find((d) => d.id === dbSelectedId)) ? dbSelectedId : (dbList[0]?.id || '');
           setSelectedDb(pre2);
-          if (!pre2) {
-            try { const { label } = getDbElements(); if (label) label.textContent = 'Select database...'; } catch {}
-          }
-          if (status) status.textContent = '';
-        }, 500);
+        }, 600);
       } catch (e) {
         if (status) status.textContent = String(e?.message || e);
       }
