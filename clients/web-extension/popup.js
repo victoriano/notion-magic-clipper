@@ -328,15 +328,7 @@ async function listDatabases(query) {
     if (trigger) { trigger.disabled = true; trigger.setAttribute('aria-busy', 'true'); }
   } catch {}
   const res = await chrome.runtime.sendMessage({ type: 'LIST_DATABASES', query });
-  try {
-    console.log('[NotionMagicClipper][Popup]', 'LIST_DATABASES result meta', {
-      ok: !!res?.ok,
-      fromCache: !!res?.fromCache,
-      version: res?.version || null,
-      stale: !!res?.stale,
-      count: Array.isArray(res?.databases) ? res.databases.length : 0
-    });
-  } catch {}
+  
   // If server indicates stale, optionally kick a manual reindex once
   try {
     if (res?.ok && res?.stale) {
@@ -405,10 +397,7 @@ async function loadDatabases() {
   const result = await listDatabases('');
   const merged = Array.isArray(result?.items) ? result.items : [];
   dbList = merged.slice();
-  try {
-    // Sample a few items for debugging workspaceName
-    console.log('[NotionMagicClipper][Popup] sample db items', dbList.slice(0, 3));
-  } catch {}
+  
   // Order by recent usage; boost lastDatabaseId
   dbList = orderDatabasesByRecentUsage(dbList, stored.recentSaves || [], stored.lastDatabaseId || '');
   dbFiltered = dbList.slice();
@@ -440,14 +429,7 @@ async function loadDatabases() {
   // Preselect last used or first
   const pre = stored.lastDatabaseId && dbList.find((d) => d.id === stored.lastDatabaseId) ? stored.lastDatabaseId : (dbList[0]?.id || '');
   setSelectedDb(pre);
-  try {
-    console.log('[NotionMagicClipper][Popup]', 'Databases loaded meta', {
-      source: result?.fromCache ? 'cache' : 'fresh',
-      version: result?.version || null,
-      stale: !!result?.stale,
-      count: dbList.length
-    });
-  } catch {}
+  
   // Restore label if nothing selected
   if (!pre) {
     try { const { label } = getDbElements(); if (label) label.textContent = 'Select database...'; } catch {}
