@@ -7,7 +7,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "trigger:dev": "bunx --yes trigger.dev@latest dev",
+    "trigger:dev:ref": "bunx --yes trigger.dev@latest dev --project-ref proj_hmdjuugvemdvygvlfppm"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.1",
