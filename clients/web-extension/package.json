@@ -1,6 +1,6 @@
 {
   "name": "workspace",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Clip the web to Notion with a bit of magic ✨",
   "main": "background.js",
   "scripts": {
