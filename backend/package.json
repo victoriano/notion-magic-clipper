@@ -4,11 +4,11 @@
   "version": "0.1.0",
   "packageManager": "bun@1.2.8",
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev & bunx --yes trigger.dev@latest dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "trigger:dev": "bunx --yes trigger.dev@latest dev",
+    "dev:trigger": "bunx --yes trigger.dev@latest dev",
     "trigger:dev:ref": "bunx --yes trigger.dev@latest dev --project-ref proj_hmdjuugvemdvygvlfppm"
   },
   "dependencies": {
