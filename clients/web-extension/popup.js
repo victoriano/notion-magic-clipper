@@ -886,25 +886,47 @@ async function main() {
       if (!items.length) { historyStatus.textContent = 'No recent saves yet.'; return; }
       for (const it of items) {
         const li = document.createElement('li');
-        const notionLink = document.createElement('a');
-        notionLink.href = it.notion_page_url || '#';
-        notionLink.textContent = it.title || 'Untitled';
-        notionLink.target = '_blank';
-        notionLink.rel = 'noopener noreferrer';
-        const sourceLink = document.createElement('a');
-        sourceLink.href = it.source_url || '#';
-        sourceLink.textContent = ' 🔗';
-        sourceLink.title = 'Open original page';
-        sourceLink.style.marginLeft = '6px';
-        sourceLink.target = '_blank';
-        sourceLink.rel = 'noopener noreferrer';
+        li.className = 'history-item';
+        const top = document.createElement('div');
+        top.className = 'hi-top';
+        const title = document.createElement('a');
+        title.className = 'hi-title';
+        title.href = it.notion_page_url || '#';
+        title.textContent = it.title || 'Untitled';
+        title.target = '_blank';
+        title.rel = 'noopener noreferrer';
+        top.appendChild(title);
+        if (it.source_url) {
+          const source = document.createElement('a');
+          source.className = 'hi-source';
+          source.href = it.source_url || '#';
+          source.textContent = '🔗';
+          source.title = 'open original source';
+          source.target = '_blank';
+          source.rel = 'noopener noreferrer';
+          top.appendChild(source);
+        }
+        const meta = document.createElement('div');
+        meta.className = 'hi-meta';
+        // Duration badge
+        try {
+          const s = it.started_at ? new Date(it.started_at).getTime() : NaN;
+          const c = it.completed_at ? new Date(it.completed_at).getTime() : NaN;
+          if (!Number.isNaN(s) && !Number.isNaN(c) && c >= s) {
+            const secs = ((c - s) / 1000);
+            const label = secs >= 10 ? Math.round(secs) + 's' : secs.toFixed(1) + 's';
+            const b = document.createElement('span');
+            b.className = 'badge';
+            b.textContent = label;
+            meta.appendChild(b);
+          }
+        } catch {}
         const time = document.createElement('span');
         const d = new Date(it.completed_at || it.started_at || Date.now());
-        time.textContent = '  ·  ' + d.toLocaleString();
-        time.style.color = '#666';
-        li.appendChild(notionLink);
-        if (it.source_url) li.appendChild(sourceLink);
-        li.appendChild(time);
+        time.textContent = d.toLocaleString();
+        meta.appendChild(time);
+        li.appendChild(top);
+        li.appendChild(meta);
         historyList.appendChild(li);
       }
       return;
@@ -915,25 +937,42 @@ async function main() {
     if (!items.length) { historyStatus.textContent = 'No recent saves yet.'; return; }
     for (const it of items) {
       const li = document.createElement('li');
-      const notionLink = document.createElement('a');
-      notionLink.href = it.url || '#';
-      notionLink.textContent = it.title || 'Untitled';
-      notionLink.target = '_blank';
-      notionLink.rel = 'noopener noreferrer';
-      const sourceLink = document.createElement('a');
-      sourceLink.href = it.sourceUrl || '#';
-      sourceLink.textContent = ' 🔗';
-      sourceLink.title = 'Open original page';
-      sourceLink.style.marginLeft = '6px';
-      sourceLink.target = '_blank';
-      sourceLink.rel = 'noopener noreferrer';
+      li.className = 'history-item';
+      const top = document.createElement('div');
+      top.className = 'hi-top';
+      const title = document.createElement('a');
+      title.className = 'hi-title';
+      title.href = it.url || '#';
+      title.textContent = it.title || 'Untitled';
+      title.target = '_blank';
+      title.rel = 'noopener noreferrer';
+      top.appendChild(title);
+      if (it.sourceUrl) {
+        const source = document.createElement('a');
+        source.className = 'hi-source';
+        source.href = it.sourceUrl || '#';
+        source.textContent = '🔗';
+        source.title = 'open original source';
+        source.target = '_blank';
+        source.rel = 'noopener noreferrer';
+        top.appendChild(source);
+      }
+      const meta = document.createElement('div');
+      meta.className = 'hi-meta';
+      if (typeof it.durationMs === 'number' && it.durationMs > 0) {
+        const secs = it.durationMs / 1000;
+        const label = secs >= 10 ? Math.round(secs) + 's' : secs.toFixed(1) + 's';
+        const b = document.createElement('span');
+        b.className = 'badge';
+        b.textContent = label;
+        meta.appendChild(b);
+      }
       const time = document.createElement('span');
       const d = new Date(typeof it.ts === 'number' ? it.ts : Date.now());
-      time.textContent = '  ·  ' + d.toLocaleString();
-      time.style.color = '#666';
-      li.appendChild(notionLink);
-      if (it.sourceUrl) li.appendChild(sourceLink);
-      li.appendChild(time);
+      time.textContent = d.toLocaleString();
+      meta.appendChild(time);
+      li.appendChild(top);
+      li.appendChild(meta);
       historyList.appendChild(li);
     }
   }
