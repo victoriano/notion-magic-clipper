@@ -391,6 +391,60 @@ function orderDatabasesByRecentUsage(list, recentSaves, lastDatabaseId) {
   return scored.map((s) => s.d);
 }
 
+// --- Active Trigger runs UI ---
+let activeRunsTimer = null;
+let lastActiveRunsHtml = '';
+async function fetchActiveRunsOnce() {
+  try {
+    const el = document.getElementById('activeRuns');
+    if (!el) return;
+    const statusEl = document.getElementById('status');
+    const { backendUrl } = await getStorage(['backendUrl']);
+    const base = (backendUrl || 'http://localhost:3000').replace(/\/$/, '');
+    const resp = await fetch(`${base}/api/clip/await?active=1`, { credentials: 'include' });
+    if (!resp.ok) { return; }
+    const j = await resp.json().catch(() => ({}));
+    const saves = Array.isArray(j?.saves) ? j.saves : [];
+    if (!saves.length) {
+      el.innerHTML = '';
+      // If the main status still shows a running message, keep it; else nothing
+      return;
+    }
+    const rows = saves.map((s) => {
+      const db = s.database_id ? ` • ${String(s.database_id).slice(0,6)}…` : '';
+      const started = s.started_at ? new Date(s.started_at) : null;
+      const time = started ? started.toLocaleTimeString() : '';
+      const icon = s.status === 'running' ? '<span class="spinner" aria-hidden="true"></span>' : '⏳';
+      const title = s.title ? `<strong>${s.title}</strong>` : '<strong>Saving…</strong>';
+      return `<div class="active-run">${icon} ${title} <span style="color:#6b7280">${s.status}${db}${time ? ` • ${time}` : ''}</span></div>`;
+    }).join('');
+    const html = `<div style="margin-top:8px"><div style="font-weight:600;color:#374151;margin-bottom:2px">Active saves</div>${rows}</div>`;
+    if (html !== lastActiveRunsHtml) {
+      el.innerHTML = html;
+      lastActiveRunsHtml = html;
+    }
+  } catch {}
+}
+
+function startActiveRunsPolling() {
+  try { stopActiveRunsPolling(); } catch {}
+  fetchActiveRunsOnce();
+  activeRunsTimer = setInterval(fetchActiveRunsOnce, 2000);
+}
+
+function stopActiveRunsPolling(opts = {}) {
+  if (activeRunsTimer) { clearInterval(activeRunsTimer); activeRunsTimer = null; }
+  const { delayClearMs } = opts || {};
+  const el = document.getElementById('activeRuns');
+  if (!el) return;
+  if (typeof delayClearMs === 'number' && delayClearMs > 0) {
+    setTimeout(() => { if (!activeRunsTimer) { el.innerHTML = ''; lastActiveRunsHtml = ''; } }, delayClearMs);
+  } else {
+    el.innerHTML = '';
+    lastActiveRunsHtml = '';
+  }
+}
+
 async function loadDatabases() {
   console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Loading databases…`);
   const stored = await getStorage(['recentSaves', 'lastDatabaseId']);
@@ -507,6 +561,7 @@ async function save() {
   })(context);
   const label = formatModelLabel(llmProvider || 'openai', llmModel || 'gpt-5-nano');
   status.textContent = `Analyzing content with ${label} and saving to Notion...`;
+  try { startActiveRunsPolling(); } catch {}
   console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Got page context. Sending SAVE_TO_NOTION…`);
   const note = document.getElementById('note').value.trim();
   const res = await chrome.runtime.sendMessage({
@@ -521,6 +576,7 @@ async function save() {
   if (!res?.ok) {
     console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Save failed:`, res?.error);
     status.innerHTML = `<span class="error">${res?.error || 'Error saving'}</span>`;
+    try { stopActiveRunsPolling(); } catch {}
     return;
   }
   console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Save success. Page created.`);
@@ -529,6 +585,7 @@ async function save() {
   status.innerHTML = `<span class="success">Saved successfully in ${seconds} seconds ✅</span>` + (pageUrl ? `<div class="success-link"><a href="${pageUrl}" target="_blank" rel="noopener noreferrer">Open in Notion ↗</a></div>` : '');
   // Remember last used database for next session and ordering boost
   await setStorage({ lastDatabaseId: databaseId });
+  try { stopActiveRunsPolling({ delayClearMs: 2000 }); } catch {}
 }
 
 async function main() {
@@ -981,6 +1038,18 @@ async function main() {
     e.preventDefault();
     save();
   });
+
+  // Start polling active runs whenever the popup is shown; stop when hidden/unloaded
+  try { startActiveRunsPolling(); } catch {}
+  try {
+    window.addEventListener('unload', () => { try { stopActiveRunsPolling(); } catch {} });
+    document.addEventListener('visibilitychange', () => {
+      try {
+        if (document.visibilityState === 'visible') startActiveRunsPolling();
+        else stopActiveRunsPolling();
+      } catch {}
+    });
+  } catch {}
 }
 
 main().catch((e) => {

@@ -22,9 +22,21 @@ export async function GET(req: NextRequest) {
 		const id = searchParams.get('id');
 		const runId = searchParams.get('run_id');
 		const recent = searchParams.get('recent');
+		const active = searchParams.get('active');
 		const userId = cookies().get('sb_user_id')?.value;
 		if (!userId) return withCors(req, NextResponse.json({ error: 'Login required' }, { status: 401 }));
 		if (!supabaseAdmin) return withCors(req, NextResponse.json({ error: 'Server misconfigured' }, { status: 500 }));
+		if (active) {
+			const { data, error } = await supabaseAdmin
+				.from('notion_saves')
+				.select('id, status, run_id, notion_page_id, notion_page_url, error, started_at, completed_at, source_url, title, database_id')
+				.eq('user_id', userId)
+				.in('status', ['queued','running'])
+				.order('started_at', { ascending: false })
+				.limit(20);
+			if (error) return withCors(req, NextResponse.json({ error: error.message }, { status: 500 }));
+			return withCors(req, NextResponse.json({ saves: data || [] }));
+		}
 		if (recent) {
 			const { data, error } = await supabaseAdmin
 				.from('notion_saves')
