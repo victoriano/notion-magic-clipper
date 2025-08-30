@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 
-import { spawn } from 'bun';
-import * as fs from 'fs/promises';
-import * as path from 'path';
-import os from 'os';
+import { spawn } from "bun";
+import * as fs from "fs/promises";
+import * as path from "path";
+import os from "os";
 
 type ManifestV3 = {
   version: string;
@@ -29,24 +29,26 @@ async function assertFile(relativePath: string, baseDir: string) {
   }
 }
 
-async function validateExtensionLayout(extDir: string): Promise<{ version: string; filesToZip: string[] }> {
-  const manifestPath = path.join(extDir, 'manifest.json');
-  const raw = await fs.readFile(manifestPath, 'utf8');
+async function validateExtensionLayout(
+  extDir: string,
+): Promise<{ version: string; filesToZip: string[] }> {
+  const manifestPath = path.join(extDir, "manifest.json");
+  const raw = await fs.readFile(manifestPath, "utf8");
   // Be tolerant to trailing commas or comments (shouldn't exist, but helps avoid CI hiccups)
   const cleaned = raw
-    .replace(/\/\*[\s\S]*?\*\//g, '') // block comments
-    .replace(/(^|[^:])\/\/.*$/gm, '$1') // line comments
-    .replace(/,\s*(\}|\])/g, '$1'); // trailing commas
+    .replace(/\/\*[\s\S]*?\*\//g, "") // block comments
+    .replace(/(^|[^:])\/\/.*$/gm, "$1") // line comments
+    .replace(/,\s*(\}|\])/g, "$1"); // trailing commas
   const manifest: ManifestV3 = JSON.parse(cleaned);
 
-  if (!manifest?.version) throw new Error('manifest.json: missing version');
+  if (!manifest?.version) throw new Error("manifest.json: missing version");
 
   // Background service worker
-  const sw = manifest?.background?.service_worker || 'background.js';
+  const sw = manifest?.background?.service_worker || "background.js";
   await assertFile(sw, extDir);
 
   // Popup
-  const popup = manifest?.action?.default_popup || 'popup.html';
+  const popup = manifest?.action?.default_popup || "popup.html";
   await assertFile(popup, extDir);
 
   // Icons (ensure at least the ones referenced in manifest exist)
@@ -62,11 +64,11 @@ async function validateExtensionLayout(extDir: string): Promise<{ version: strin
   for (const rel of contentJs) await assertFile(rel, extDir);
 
   // Minimal dynamic code check (best-effort)
-  const scanTargets = ['background.js', 'contentScript.js', 'popup.js'];
+  const scanTargets = ["background.js", "contentScript.js", "popup.js"];
   for (const rel of scanTargets) {
     const p = path.join(extDir, rel);
     if (!(await pathExists(p))) continue;
-    const text = await fs.readFile(p, 'utf8');
+    const text = await fs.readFile(p, "utf8");
     if (/\beval\s*\(|new\s+Function\s*\(/i.test(text)) {
       throw new Error(`Dynamic code usage found in ${rel} (eval/new Function).`);
     }
@@ -74,14 +76,14 @@ async function validateExtensionLayout(extDir: string): Promise<{ version: strin
 
   // Files/dirs to zip
   const filesToZip = [
-    'manifest.json',
-    'background.js',
-    'contentScript.js',
-    'popup.html',
-    'popup.js',
-    'icons',
-    'vendor',
-    'utils'
+    "manifest.json",
+    "background.js",
+    "contentScript.js",
+    "popup.html",
+    "popup.js",
+    "icons",
+    "vendor",
+    "utils",
   ].filter(Boolean);
 
   // Verify presence of main entries
@@ -89,7 +91,7 @@ async function validateExtensionLayout(extDir: string): Promise<{ version: strin
     const abs = path.join(extDir, rel);
     if (!(await pathExists(abs))) {
       // Allow missing optional folders but ensure key files exist
-      if (['icons', 'vendor', 'utils'].includes(rel)) continue;
+      if (["icons", "vendor", "utils"].includes(rel)) continue;
       throw new Error(`Expected entry missing: ${rel}`);
     }
   }
@@ -99,24 +101,32 @@ async function validateExtensionLayout(extDir: string): Promise<{ version: strin
 
 async function runZip(extDir: string, outZipPath: string, entries: string[]) {
   // Remove preexisting archive to ensure a clean build
-  try { await fs.rm(outZipPath); } catch {}
+  try {
+    await fs.rm(outZipPath);
+  } catch {}
   const args = [
-    '-r', // recurse
-    '-9', // best compression
+    "-r", // recurse
+    "-9", // best compression
     outZipPath,
     ...entries,
-    '-x', '**/.DS_Store', '**/*.map', '**/.git*', '**/node_modules/**', 'package*.json', 'README.md'
+    "-x",
+    "**/.DS_Store",
+    "**/*.map",
+    "**/.git*",
+    "**/node_modules/**",
+    "package*.json",
+    "README.md",
   ];
-  const proc = spawn({ cmd: ['zip', ...args], cwd: extDir, stdout: 'inherit', stderr: 'inherit' });
+  const proc = spawn({ cmd: ["zip", ...args], cwd: extDir, stdout: "inherit", stderr: "inherit" });
   const code = await proc.exited;
   if (code !== 0) throw new Error(`zip failed with code ${code}`);
 }
 
 async function main() {
   const repoRoot = process.cwd();
-  const extDir = path.join(repoRoot, 'clients', 'web-extension');
-  const downloadsDir = path.join(os.homedir(), 'Downloads');
-  const distDir = path.join(repoRoot, 'dist');
+  const extDir = path.join(repoRoot, "clients", "web-extension");
+  const downloadsDir = path.join(os.homedir(), "Downloads");
+  const distDir = path.join(repoRoot, "dist");
   await fs.mkdir(distDir, { recursive: true });
   await fs.mkdir(downloadsDir, { recursive: true });
 
@@ -127,15 +137,13 @@ async function main() {
 
   const dest = path.join(downloadsDir, baseName);
   await fs.copyFile(outZip, dest);
-  console.log('\nCreated ZIP:');
-  console.log('  ' + outZip);
-  console.log('Copied to:');
-  console.log('  ' + dest);
+  console.log("\nCreated ZIP:");
+  console.log("  " + outZip);
+  console.log("Copied to:");
+  console.log("  " + dest);
 }
 
 main().catch((err) => {
-  console.error('[package-extension] Error:', err?.message || err);
+  console.error("[package-extension] Error:", err?.message || err);
   process.exit(1);
 });
-
-

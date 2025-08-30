@@ -15,37 +15,38 @@ function setStorage(obj) {
 }
 
 function formatModelLabel(provider, model) {
-  if (provider === 'google' && /gemini-2\.5-flash/i.test(model || '')) return 'Google · Gemini 2.5 Flash';
-  if (provider === 'openai' && /^gpt-5/i.test(model || '')) return 'OpenAI · GPT-5 Nano';
+  if (provider === "google" && /gemini-2\.5-flash/i.test(model || ""))
+    return "Google · Gemini 2.5 Flash";
+  if (provider === "openai" && /^gpt-5/i.test(model || "")) return "OpenAI · GPT-5 Nano";
   if (provider && model) return `${provider}:${model}`;
-  return 'Selected model';
+  return "Selected model";
 }
 
 // --- Combobox state ---
 let dbList = [];
 let dbFiltered = [];
-let dbSelectedId = '';
+let dbSelectedId = "";
 let comboOpen = false;
 let comboboxHandlersAttached = false;
 let needsReloadDatabases = false;
 
 function getDbElements() {
   return {
-    trigger: document.getElementById('dbComboTrigger'),
-    dropdown: document.getElementById('dbComboDropdown'),
-    list: document.getElementById('dbComboList'),
-    empty: document.getElementById('dbComboEmpty'),
-    label: document.getElementById('dbComboLabel'),
-    search: document.getElementById('dbComboSearch')
+    trigger: document.getElementById("dbComboTrigger"),
+    dropdown: document.getElementById("dbComboDropdown"),
+    list: document.getElementById("dbComboList"),
+    empty: document.getElementById("dbComboEmpty"),
+    label: document.getElementById("dbComboLabel"),
+    search: document.getElementById("dbComboSearch"),
   };
 }
 
 function setComboOpen(open) {
   const { trigger, dropdown } = getDbElements();
   comboOpen = !!open;
-  trigger.setAttribute('aria-expanded', comboOpen ? 'true' : 'false');
-  dropdown.style.display = comboOpen ? 'block' : 'none';
-  dropdown.setAttribute('aria-hidden', comboOpen ? 'false' : 'true');
+  trigger.setAttribute("aria-expanded", comboOpen ? "true" : "false");
+  dropdown.style.display = comboOpen ? "block" : "none";
+  dropdown.setAttribute("aria-hidden", comboOpen ? "false" : "true");
   if (comboOpen) {
     // Focus search on open
     setTimeout(() => getDbElements().search?.focus(), 0);
@@ -54,40 +55,40 @@ function setComboOpen(open) {
 
 function renderDbList(items) {
   const { list, empty } = getDbElements();
-  list.innerHTML = '';
+  list.innerHTML = "";
   if (!Array.isArray(items) || items.length === 0) {
-    empty.style.display = 'block';
+    empty.style.display = "block";
     return;
   }
-  empty.style.display = 'none';
+  empty.style.display = "none";
   for (const db of items) {
-    const row = document.createElement('div');
-    row.className = 'cbx-item';
-    row.setAttribute('role', 'option');
+    const row = document.createElement("div");
+    row.className = "cbx-item";
+    row.setAttribute("role", "option");
     row.dataset.id = db.id;
-    const emoji = db.iconEmoji || '';
-    const left = document.createElement('div');
-    left.style.display = 'flex';
-    left.style.flexDirection = 'column';
-    const title = document.createElement('span');
-    title.textContent = (emoji ? `${emoji} ` : '') + db.title;
+    const emoji = db.iconEmoji || "";
+    const left = document.createElement("div");
+    left.style.display = "flex";
+    left.style.flexDirection = "column";
+    const title = document.createElement("span");
+    title.textContent = (emoji ? `${emoji} ` : "") + db.title;
     left.appendChild(title);
     if (db.workspaceName) {
-      const sub = document.createElement('span');
+      const sub = document.createElement("span");
       sub.textContent = db.workspaceName;
-      sub.style.fontSize = '12px';
-      sub.style.color = '#6b7280';
-      sub.style.lineHeight = '1.2';
-      sub.style.marginTop = '2px';
+      sub.style.fontSize = "12px";
+      sub.style.color = "#6b7280";
+      sub.style.lineHeight = "1.2";
+      sub.style.marginTop = "2px";
       left.appendChild(sub);
     }
-    const check = document.createElement('span');
-    check.textContent = '✓';
-    check.className = 'cbx-check';
+    const check = document.createElement("span");
+    check.textContent = "✓";
+    check.className = "cbx-check";
     row.appendChild(left);
     row.appendChild(check);
-    if (dbSelectedId && dbSelectedId === db.id) row.setAttribute('aria-selected', 'true');
-    row.addEventListener('click', () => {
+    if (dbSelectedId && dbSelectedId === db.id) row.setAttribute("aria-selected", "true");
+    row.addEventListener("click", () => {
       setSelectedDb(db.id);
       setComboOpen(false);
     });
@@ -96,27 +97,29 @@ function renderDbList(items) {
 }
 
 function setSelectedDb(id) {
-  dbSelectedId = id || '';
+  dbSelectedId = id || "";
   const { label, list } = getDbElements();
   const found = dbList.find((d) => d.id === dbSelectedId);
-  label.textContent = found ? `${found.iconEmoji ? found.iconEmoji + ' ' : ''}${found.title}` : 'Select database...';
+  label.textContent = found
+    ? `${found.iconEmoji ? found.iconEmoji + " " : ""}${found.title}`
+    : "Select database...";
   // update selection check
-  Array.from(list.querySelectorAll('.cbx-item')).forEach((el) => {
-    if (el.dataset.id === dbSelectedId) el.setAttribute('aria-selected', 'true');
-    else el.removeAttribute('aria-selected');
+  Array.from(list.querySelectorAll(".cbx-item")).forEach((el) => {
+    if (el.dataset.id === dbSelectedId) el.setAttribute("aria-selected", "true");
+    else el.removeAttribute("aria-selected");
   });
   // update settings link label without destroying icon
-  const openBtnLabel = document.getElementById('openDbSettingsLabel');
-  if (openBtnLabel) openBtnLabel.textContent = 'Custom save format';
+  const openBtnLabel = document.getElementById("openDbSettingsLabel");
+  if (openBtnLabel) openBtnLabel.textContent = "Custom save format";
 }
 
 function filterDbList(term) {
-  const t = String(term || '').toLowerCase();
+  const t = String(term || "").toLowerCase();
   if (!t) {
     dbFiltered = dbList.slice();
   } else {
     dbFiltered = dbList.filter((d) => {
-      const s = `${d.title} ${d.iconEmoji || ''}`.toLowerCase();
+      const s = `${d.title} ${d.iconEmoji || ""}`.toLowerCase();
       return s.includes(t);
     });
   }
@@ -127,113 +130,130 @@ function attachComboboxHandlers() {
   if (comboboxHandlersAttached) return;
   comboboxHandlersAttached = true;
   const { trigger, search, dropdown, list } = getDbElements();
-  trigger.addEventListener('click', () => setComboOpen(!comboOpen));
-  search.addEventListener('input', (e) => filterDbList(e.target.value));
+  trigger.addEventListener("click", () => setComboOpen(!comboOpen));
+  search.addEventListener("input", (e) => filterDbList(e.target.value));
   // Keyboard navigation
-  trigger.addEventListener('keydown', (e) => {
-    if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+  trigger.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       setComboOpen(true);
     }
   });
-  dropdown.addEventListener('keydown', (e) => {
-    const items = Array.from(list.querySelectorAll('.cbx-item'));
+  dropdown.addEventListener("keydown", (e) => {
+    const items = Array.from(list.querySelectorAll(".cbx-item"));
     const currentIndex = items.findIndex((el) => el.dataset.id === dbSelectedId);
-    if (e.key === 'ArrowDown') {
+    if (e.key === "ArrowDown") {
       e.preventDefault();
       const next = items[Math.min(items.length - 1, currentIndex + 1)] || items[0];
       if (next) setSelectedDb(next.dataset.id);
-    } else if (e.key === 'ArrowUp') {
+    } else if (e.key === "ArrowUp") {
       e.preventDefault();
       const prev = items[Math.max(0, currentIndex - 1)] || items[items.length - 1];
       if (prev) setSelectedDb(prev.dataset.id);
-    } else if (e.key === 'Enter') {
+    } else if (e.key === "Enter") {
       e.preventDefault();
       setComboOpen(false);
-    } else if (e.key === 'Escape') {
+    } else if (e.key === "Escape") {
       e.preventDefault();
       setComboOpen(false);
     }
   });
   // Close on outside click
-  document.addEventListener('click', (e) => {
-    const root = document.getElementById('dbCombobox');
+  document.addEventListener("click", (e) => {
+    const root = document.getElementById("dbCombobox");
     if (!root.contains(e.target)) setComboOpen(false);
   });
 }
 
 async function precheck(opts = {}) {
-  const pre = document.getElementById('precheck');
-  const app = document.getElementById('app');
-  const indicator = document.getElementById('statusIndicator');
-  const cfg = await getStorage(['notionToken', 'llmProvider', 'llmModel', 'backendUrl', 'workspaceTokens']);
-  const prodBackend = 'https://magic-clipper.vercel.app';
+  const pre = document.getElementById("precheck");
+  const app = document.getElementById("app");
+  const indicator = document.getElementById("statusIndicator");
+  const cfg = await getStorage([
+    "notionToken",
+    "llmProvider",
+    "llmModel",
+    "backendUrl",
+    "workspaceTokens",
+  ]);
+  const prodBackend = "https://magic-clipper.vercel.app";
   // Decide default backend only if none is set
   if (!cfg.backendUrl) {
     // Heuristic: prefer localhost during unpacked/dev usage.
-    const PROD_EXTENSION_ID = 'gohplijlpngkipjghachaaepbdlfabhk'; // set to your Web Store ID; leave as-is if unknown
-    const isProdExtension = (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id === PROD_EXTENSION_ID);
-    const chosen = isProdExtension ? prodBackend : 'http://localhost:3000';
+    const PROD_EXTENSION_ID = "gohplijlpngkipjghachaaepbdlfabhk"; // set to your Web Store ID; leave as-is if unknown
+    const isProdExtension =
+      typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.id === PROD_EXTENSION_ID;
+    const chosen = isProdExtension ? prodBackend : "http://localhost:3000";
     await setStorage({ backendUrl: chosen });
     cfg.backendUrl = chosen;
   }
-  const provider = cfg.llmProvider || 'openai';
-  const model = cfg.llmModel || 'gpt-5-nano';
-  const tokensMap = cfg.workspaceTokens && typeof cfg.workspaceTokens === 'object' ? cfg.workspaceTokens : {};
+  const provider = cfg.llmProvider || "openai";
+  const model = cfg.llmModel || "gpt-5-nano";
+  const tokensMap =
+    cfg.workspaceTokens && typeof cfg.workspaceTokens === "object" ? cfg.workspaceTokens : {};
   const hasNotion = Object.keys(tokensMap).length > 0 || !!cfg.notionToken;
   const ok = hasNotion; // account connected is sufficient to turn green
   if (indicator) {
-    indicator.classList.toggle('ok', ok);
-    indicator.classList.toggle('err', !ok);
-    indicator.title = ok ? 'Account connected' : 'Not connected — click to configure';
-    indicator.setAttribute('aria-label', indicator.title);
+    indicator.classList.toggle("ok", ok);
+    indicator.classList.toggle("err", !ok);
+    indicator.title = ok ? "Account connected" : "Not connected — click to configure";
+    indicator.setAttribute("aria-label", indicator.title);
   }
-  if (!opts.preserveViews) app.style.display = 'block';
+  if (!opts.preserveViews) app.style.display = "block";
   console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] precheck complete`);
 }
 
 // Open the Tokens configuration view from anywhere
 async function openTokensView() {
-  const tokensView = document.getElementById('tokensView');
-  const tokensStatus = document.getElementById('tokensStatus');
-  const tModel = document.getElementById('tModel');
-  const appView = document.getElementById('app');
-  const notionInput = document.getElementById('tNotionToken');
-  const backendInput = document.getElementById('tBackendUrl');
-  const workspaceInput = document.getElementById('tWorkspaceId');
-  const advancedBackendRow = document.getElementById('advancedBackendRow');
-  const advancedBackendUrl = document.getElementById('advancedBackendUrl');
-  const accountInfo = document.getElementById('accountInfo');
-  const logoutBtn = document.getElementById('logoutBtn');
-  const connectWorkspaceBtn = document.getElementById('connectWorkspaceBtn');
+  const tokensView = document.getElementById("tokensView");
+  const tokensStatus = document.getElementById("tokensStatus");
+  const tModel = document.getElementById("tModel");
+  const appView = document.getElementById("app");
+  const notionInput = document.getElementById("tNotionToken");
+  const backendInput = document.getElementById("tBackendUrl");
+  const workspaceInput = document.getElementById("tWorkspaceId");
+  const advancedBackendRow = document.getElementById("advancedBackendRow");
+  const advancedBackendUrl = document.getElementById("advancedBackendUrl");
+  const accountInfo = document.getElementById("accountInfo");
+  const logoutBtn = document.getElementById("logoutBtn");
+  const connectWorkspaceBtn = document.getElementById("connectWorkspaceBtn");
 
-  const { notionToken, llmProvider, llmModel, backendUrl, workspaceId } = await getStorage(['notionToken', 'llmProvider', 'llmModel', 'backendUrl', 'workspaceId']);
-  if (notionInput) notionInput.value = notionToken || '';
-  if (backendInput) backendInput.value = (backendUrl || defaultBackendBase);
-  if (workspaceInput) workspaceInput.value = workspaceId || '';
+  const { notionToken, llmProvider, llmModel, backendUrl, workspaceId } = await getStorage([
+    "notionToken",
+    "llmProvider",
+    "llmModel",
+    "backendUrl",
+    "workspaceId",
+  ]);
+  if (notionInput) notionInput.value = notionToken || "";
+  if (backendInput) backendInput.value = backendUrl || defaultBackendBase;
+  if (workspaceInput) workspaceInput.value = workspaceId || "";
   // Hide backend + legacy token UI by default; show only if a dev flag is set
-  const showAdvanced = /\bdev=1\b/i.test(location.search) || (await getStorage(['showAdvanced']))?.showAdvanced === true;
-  if (advancedBackendRow) advancedBackendRow.style.display = showAdvanced ? 'flex' : 'none';
-  if (advancedBackendUrl) advancedBackendUrl.style.display = showAdvanced ? 'block' : 'none';
-  const legacyToken = document.getElementById('legacyToken');
-  if (legacyToken) legacyToken.style.display = showAdvanced ? 'block' : 'none';
+  const showAdvanced =
+    /\bdev=1\b/i.test(location.search) ||
+    (await getStorage(["showAdvanced"]))?.showAdvanced === true;
+  if (advancedBackendRow) advancedBackendRow.style.display = showAdvanced ? "flex" : "none";
+  if (advancedBackendUrl) advancedBackendUrl.style.display = showAdvanced ? "block" : "none";
+  const legacyToken = document.getElementById("legacyToken");
+  if (legacyToken) legacyToken.style.display = showAdvanced ? "block" : "none";
 
   async function refreshAccountAndWorkspaces() {
     try {
-      const base = (backendInput?.value || 'http://localhost:3000').replace(/\/$/, '');
-      const me = await fetch(`${base}/api/auth/me`, { credentials: 'include' });
+      const base = (backendInput?.value || "http://localhost:3000").replace(/\/$/, "");
+      const me = await fetch(`${base}/api/auth/me`, { credentials: "include" });
       if (me.ok) {
         const j = await me.json();
-        if (accountInfo) accountInfo.textContent = j.email ? `Logged in as ${j.email}` : 'Logged in';
-        if (logoutBtn) logoutBtn.style.display = 'inline-flex';
-        if (connectWorkspaceBtn) connectWorkspaceBtn.style.display = 'inline-flex';
-        if (startNotionLogin) startNotionLogin.style.display = 'none';
+        if (accountInfo)
+          accountInfo.textContent = j.email ? `Logged in as ${j.email}` : "Logged in";
+        if (logoutBtn) logoutBtn.style.display = "inline-flex";
+        if (connectWorkspaceBtn) connectWorkspaceBtn.style.display = "inline-flex";
+        if (startNotionLogin) startNotionLogin.style.display = "none";
         await setStorage({ authLoggedIn: true });
       } else {
-        if (accountInfo) accountInfo.textContent = 'Not logged in';
-        if (logoutBtn) logoutBtn.style.display = 'none';
-        if (connectWorkspaceBtn) connectWorkspaceBtn.style.display = 'none';
-        if (startNotionLogin) startNotionLogin.style.display = 'inline-flex';
+        if (accountInfo) accountInfo.textContent = "Not logged in";
+        if (logoutBtn) logoutBtn.style.display = "none";
+        if (connectWorkspaceBtn) connectWorkspaceBtn.style.display = "none";
+        if (startNotionLogin) startNotionLogin.style.display = "inline-flex";
         await setStorage({ authLoggedIn: false });
       }
       await refreshLinkedWorkspaces();
@@ -244,137 +264,183 @@ async function openTokensView() {
 
   // Populate linked workspaces list
   async function refreshLinkedWorkspaces() {
-    const list = document.getElementById('linkedWorkspaces');
+    const list = document.getElementById("linkedWorkspaces");
     if (!list) return;
-    list.innerHTML = '';
+    list.innerHTML = "";
     try {
-      const base = (backendInput?.value || 'http://localhost:3000').replace(/\/$/, '');
-      const res = await fetch(`${base}/api/notion/workspaces`, { credentials: 'include' });
-      if (!res.ok) { list.innerHTML = '<li style="color:#999">No workspaces (not logged in)</li>'; return; }
+      const base = (backendInput?.value || "http://localhost:3000").replace(/\/$/, "");
+      const res = await fetch(`${base}/api/notion/workspaces`, { credentials: "include" });
+      if (!res.ok) {
+        list.innerHTML = '<li style="color:#999">No workspaces (not logged in)</li>';
+        return;
+      }
       const data = await res.json();
       const workspaces = Array.isArray(data.workspaces) ? data.workspaces : [];
-      if (!workspaces.length) { list.innerHTML = '<li style="color:#999">No workspaces linked</li>'; return; }
+      if (!workspaces.length) {
+        list.innerHTML = '<li style="color:#999">No workspaces linked</li>';
+        return;
+      }
       for (const w of workspaces) {
-        const li = document.createElement('li');
-        li.style.display = 'flex'; li.style.alignItems = 'center'; li.style.gap = '14px'; li.style.marginBottom = '8px';
-        const span = document.createElement('span');
-        const acct = w.account_email || w.account_name ? ` — ${w.account_name || w.account_email}` : '';
-        span.textContent = `${w.workspace_name || 'Untitled'}${acct}`;
+        const li = document.createElement("li");
+        li.style.display = "flex";
+        li.style.alignItems = "center";
+        li.style.gap = "14px";
+        li.style.marginBottom = "8px";
+        const span = document.createElement("span");
+        const acct =
+          w.account_email || w.account_name ? ` — ${w.account_name || w.account_email}` : "";
+        span.textContent = `${w.workspace_name || "Untitled"}${acct}`;
         if (w.account_email) span.title = w.account_email;
-        const btn = document.createElement('button');
-        btn.className = 'btn btn-outline'; btn.textContent = 'Disconnect';
-        btn.addEventListener('click', async () => {
-          const ok = confirm('Disconnect this workspace?');
+        const btn = document.createElement("button");
+        btn.className = "btn btn-outline";
+        btn.textContent = "Disconnect";
+        btn.addEventListener("click", async () => {
+          const ok = confirm("Disconnect this workspace?");
           if (!ok) return;
-          const r = await fetch(`${base}/api/notion/connection?workspace_id=${encodeURIComponent(w.workspace_id)}`, { method: 'DELETE', credentials: 'include' });
-          if (r.ok) { await setStorage({ workspaceTokens: {} }); await refreshLinkedWorkspaces(); await precheck({ preserveViews: true }); }
+          const r = await fetch(
+            `${base}/api/notion/connection?workspace_id=${encodeURIComponent(w.workspace_id)}`,
+            { method: "DELETE", credentials: "include" },
+          );
+          if (r.ok) {
+            await setStorage({ workspaceTokens: {} });
+            await refreshLinkedWorkspaces();
+            await precheck({ preserveViews: true });
+          }
         });
-        li.appendChild(span); li.appendChild(btn);
+        li.appendChild(span);
+        li.appendChild(btn);
         list.appendChild(li);
       }
-    } catch { list.innerHTML = '<li style="color:#999">Failed to load</li>'; }
+    } catch {
+      list.innerHTML = '<li style="color:#999">Failed to load</li>';
+    }
   }
   await refreshLinkedWorkspaces();
 
   // Populate model selector based on available keys
   const options = [
-    { value: 'openai:gpt-5-nano', label: 'OpenAI · GPT-5 Nano' },
-    { value: 'google:gemini-2.5-flash', label: 'Google · Gemini 2.5 Flash' },
+    { value: "openai:gpt-5-nano", label: "OpenAI · GPT-5 Nano" },
+    { value: "google:gemini-2.5-flash", label: "Google · Gemini 2.5 Flash" },
   ];
   if (tModel) {
-    tModel.innerHTML = '';
+    tModel.innerHTML = "";
     for (const o of options) {
-      const opt = document.createElement('option');
-      opt.value = o.value; opt.textContent = o.label; tModel.appendChild(opt);
+      const opt = document.createElement("option");
+      opt.value = o.value;
+      opt.textContent = o.label;
+      tModel.appendChild(opt);
     }
-    const desired = `${llmProvider || 'openai'}:${llmModel || 'gpt-5-nano'}`;
+    const desired = `${llmProvider || "openai"}:${llmModel || "gpt-5-nano"}`;
     const found = Array.from(tModel.options).some((o) => o.value === desired);
     tModel.value = found ? desired : options[0].value;
   }
   // GPT-5 options show/hide
-  const gpt5Options = document.getElementById('gpt5Options');
-  const tGpt5Reasoning = document.getElementById('tGpt5Reasoning');
-  const tGpt5Verbosity = document.getElementById('tGpt5Verbosity');
+  const gpt5Options = document.getElementById("gpt5Options");
+  const tGpt5Reasoning = document.getElementById("tGpt5Reasoning");
+  const tGpt5Verbosity = document.getElementById("tGpt5Verbosity");
   const showGpt5 = () => {
     try {
-      const val = String(tModel?.value || '').toLowerCase();
-      const isGpt5 = val.startsWith('openai:gpt-5');
-      if (gpt5Options) gpt5Options.style.display = isGpt5 ? 'block' : 'none';
+      const val = String(tModel?.value || "").toLowerCase();
+      const isGpt5 = val.startsWith("openai:gpt-5");
+      if (gpt5Options) gpt5Options.style.display = isGpt5 ? "block" : "none";
     } catch {}
   };
   showGpt5();
-  if (tModel) tModel.addEventListener('change', showGpt5);
+  if (tModel) tModel.addEventListener("change", showGpt5);
   // Load saved GPT-5 prefs
   try {
-    const { openai_reasoning_effort, openai_verbosity } = await getStorage(['openai_reasoning_effort', 'openai_verbosity']);
-    if (tGpt5Reasoning && typeof openai_reasoning_effort === 'string') tGpt5Reasoning.value = openai_reasoning_effort;
-    if (tGpt5Verbosity && typeof openai_verbosity === 'string') tGpt5Verbosity.value = openai_verbosity;
+    const { openai_reasoning_effort, openai_verbosity } = await getStorage([
+      "openai_reasoning_effort",
+      "openai_verbosity",
+    ]);
+    if (tGpt5Reasoning && typeof openai_reasoning_effort === "string")
+      tGpt5Reasoning.value = openai_reasoning_effort;
+    if (tGpt5Verbosity && typeof openai_verbosity === "string")
+      tGpt5Verbosity.value = openai_verbosity;
   } catch {}
-  if (appView) appView.style.display = 'none';
-  if (tokensStatus) tokensStatus.textContent = '';
-  if (tokensView) tokensView.style.display = 'block';
+  if (appView) appView.style.display = "none";
+  if (tokensStatus) tokensStatus.textContent = "";
+  if (tokensView) tokensView.style.display = "block";
 }
 
 // Expose for fallback handlers (module scope isn't global in type="module")
-try { window.openTokensView = openTokensView; } catch {}
+try {
+  window.openTokensView = openTokensView;
+} catch {}
 
 async function listDatabases(query) {
-  const status = document.getElementById('status');
-  if (status) status.textContent = '';
+  const status = document.getElementById("status");
+  if (status) status.textContent = "";
   // Show loading state inside the combobox label and disable trigger
   try {
     const { label, trigger } = getDbElements();
-    if (label) label.textContent = 'Loading databases...';
-    if (trigger) { trigger.disabled = true; trigger.setAttribute('aria-busy', 'true'); }
+    if (label) label.textContent = "Loading databases...";
+    if (trigger) {
+      trigger.disabled = true;
+      trigger.setAttribute("aria-busy", "true");
+    }
   } catch {}
-  const res = await chrome.runtime.sendMessage({ type: 'LIST_DATABASES', query });
-  
+  const res = await chrome.runtime.sendMessage({ type: "LIST_DATABASES", query });
+
   // If server indicates stale, optionally kick a manual reindex once
   try {
     if (res?.ok && res?.stale) {
       // Fire and forget; user can also trigger from UI when added
-      chrome.runtime.sendMessage({ type: 'REINDEX_DATABASES' }).catch(() => {});
+      chrome.runtime.sendMessage({ type: "REINDEX_DATABASES" }).catch(() => {});
     }
   } catch {}
   if (!res?.ok) {
-    const err = res?.error || '';
+    const err = res?.error || "";
     if (/Missing Notion token/i.test(err)) {
-      status.innerHTML = 'Missing Notion token. <a href="#" id="openTokensFromStatus">Configure it</a>.';
-      const link = document.getElementById('openTokensFromStatus');
-      if (link) link.addEventListener('click', (e) => {
-        e.preventDefault();
-        if (typeof window !== 'undefined' && typeof window.openTokensView === 'function') {
-          window.openTokensView();
-        } else {
-          const ind = document.getElementById('statusIndicator');
-          if (ind) ind.click();
-        }
-      });
+      status.innerHTML =
+        'Missing Notion token. <a href="#" id="openTokensFromStatus">Configure it</a>.';
+      const link = document.getElementById("openTokensFromStatus");
+      if (link)
+        link.addEventListener("click", (e) => {
+          e.preventDefault();
+          if (typeof window !== "undefined" && typeof window.openTokensView === "function") {
+            window.openTokensView();
+          } else {
+            const ind = document.getElementById("statusIndicator");
+            if (ind) ind.click();
+          }
+        });
     } else {
-      status.textContent = err || 'Error listing databases';
+      status.textContent = err || "Error listing databases";
     }
     // Re-enable combobox trigger and restore label
     try {
       const { label, trigger } = getDbElements();
-      if (label) label.textContent = 'Select database...';
-      if (trigger) { trigger.disabled = false; trigger.removeAttribute('aria-busy'); }
+      if (label) label.textContent = "Select database...";
+      if (trigger) {
+        trigger.disabled = false;
+        trigger.removeAttribute("aria-busy");
+      }
     } catch {}
     return { items: [], fromCache: false, version: null, stale: false };
   }
-  if (status) status.textContent = '';
+  if (status) status.textContent = "";
   // Clear loading state
   try {
     const { trigger } = getDbElements();
-    if (trigger) { trigger.disabled = false; trigger.removeAttribute('aria-busy'); }
+    if (trigger) {
+      trigger.disabled = false;
+      trigger.removeAttribute("aria-busy");
+    }
   } catch {}
-  return { items: res.databases || [], fromCache: !!res.fromCache, version: res.version || null, stale: !!res.stale };
+  return {
+    items: res.databases || [],
+    fromCache: !!res.fromCache,
+    version: res.version || null,
+    stale: !!res.stale,
+  };
 }
 
 function orderDatabasesByRecentUsage(list, recentSaves, lastDatabaseId) {
   const byIdLatestTs = new Map();
   for (const it of Array.isArray(recentSaves) ? recentSaves : []) {
     if (!it?.databaseId) continue;
-    const ts = typeof it.ts === 'number' ? it.ts : 0;
+    const ts = typeof it.ts === "number" ? it.ts : 0;
     const prev = byIdLatestTs.get(it.databaseId) || 0;
     if (ts > prev) byIdLatestTs.set(it.databaseId, ts);
   }
@@ -386,7 +452,7 @@ function orderDatabasesByRecentUsage(list, recentSaves, lastDatabaseId) {
   scored.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
     if (b.lastBoost !== a.lastBoost) return b.lastBoost - a.lastBoost;
-    return String(a.d.title || '').localeCompare(String(b.d.title || ''));
+    return String(a.d.title || "").localeCompare(String(b.d.title || ""));
   });
   return scored.map((s) => s.d);
 }
@@ -394,36 +460,39 @@ function orderDatabasesByRecentUsage(list, recentSaves, lastDatabaseId) {
 function formatRelativeTime(to) {
   try {
     const now = Date.now();
-    const t = typeof to === 'number' ? to : (to instanceof Date ? to.getTime() : new Date(to).getTime());
-    if (Number.isNaN(t)) return '';
+    const t =
+      typeof to === "number" ? to : to instanceof Date ? to.getTime() : new Date(to).getTime();
+    if (Number.isNaN(t)) return "";
     const delta = Math.max(0, now - t);
     const sec = Math.round(delta / 1000);
     if (sec < 60) return `${sec}s ago`;
     const min = Math.round(sec / 60);
-    if (min < 60) return `${min} minute${min === 1 ? '' : 's'} ago`;
+    if (min < 60) return `${min} minute${min === 1 ? "" : "s"} ago`;
     const hr = Math.round(min / 60);
-    if (hr < 24) return `${hr} hour${hr === 1 ? '' : 's'} ago`;
+    if (hr < 24) return `${hr} hour${hr === 1 ? "" : "s"} ago`;
     const day = Math.round(hr / 24);
-    if (day < 7) return `${day} day${day === 1 ? '' : 's'} ago`;
+    if (day < 7) return `${day} day${day === 1 ? "" : "s"} ago`;
     const wk = Math.round(day / 7);
-    if (wk < 4) return `${wk} week${wk === 1 ? '' : 's'} ago`;
+    if (wk < 4) return `${wk} week${wk === 1 ? "" : "s"} ago`;
     const mo = Math.round(day / 30);
-    if (mo < 12) return `${mo} month${mo === 1 ? '' : 's'} ago`;
+    if (mo < 12) return `${mo} month${mo === 1 ? "" : "s"} ago`;
     const yr = Math.round(day / 365);
-    return `${yr} year${yr === 1 ? '' : 's'} ago`;
-  } catch { return ''; }
+    return `${yr} year${yr === 1 ? "" : "s"} ago`;
+  } catch {
+    return "";
+  }
 }
 
 async function renderLastSavedHint() {
-  const el = document.getElementById('lastSaved');
+  const el = document.getElementById("lastSaved");
   if (!el) return;
   try {
-    const { backendUrl, recentSaves } = await getStorage(['backendUrl', 'recentSaves']);
-    const base = (backendUrl || 'http://localhost:3000').replace(/\/$/, '');
+    const { backendUrl, recentSaves } = await getStorage(["backendUrl", "recentSaves"]);
+    const base = (backendUrl || "http://localhost:3000").replace(/\/$/, "");
     // Prefer backend recent saves for logged-in users
     let ts = null;
     try {
-      const resp = await fetch(`${base}/api/clip/await?recent=1`, { credentials: 'include' });
+      const resp = await fetch(`${base}/api/clip/await?recent=1`, { credentials: "include" });
       if (resp.ok) {
         const j = await resp.json().catch(() => ({}));
         const items = Array.isArray(j?.saves) ? j.saves : [];
@@ -433,52 +502,62 @@ async function renderLastSavedHint() {
     } catch {}
     if (ts == null) {
       const local = Array.isArray(recentSaves) ? recentSaves : [];
-      if (local.length) ts = typeof local[0].ts === 'number' ? local[0].ts : Date.now();
+      if (local.length) ts = typeof local[0].ts === "number" ? local[0].ts : Date.now();
     }
-    if (!ts) { el.textContent = ''; return; }
+    if (!ts) {
+      el.textContent = "";
+      return;
+    }
     const rel = formatRelativeTime(ts);
-    const link = document.createElement('a');
-    link.href = '#';
-    link.textContent = rel || 'recent';
-    link.title = 'Open recent saves';
-    link.addEventListener('click', (e) => {
+    const link = document.createElement("a");
+    link.href = "#";
+    link.textContent = rel || "recent";
+    link.title = "Open recent saves";
+    link.addEventListener("click", (e) => {
       e.preventDefault();
-      const btn = document.getElementById('openHistory');
+      const btn = document.getElementById("openHistory");
       if (btn) btn.click();
     });
-    el.innerHTML = '';
-    el.appendChild(document.createTextNode('Last clip saved '));
+    el.innerHTML = "";
+    el.appendChild(document.createTextNode("Last clip saved "));
     el.appendChild(link);
-  } catch { el.textContent = ''; }
+  } catch {
+    el.textContent = "";
+  }
 }
 
 // --- Active Trigger runs UI ---
 let activeRunsTimer = null;
-let lastActiveRunsHtml = '';
+let lastActiveRunsHtml = "";
 async function fetchActiveRunsOnce() {
   try {
-    const el = document.getElementById('activeRuns');
+    const el = document.getElementById("activeRuns");
     if (!el) return;
-    const statusEl = document.getElementById('status');
-    const { backendUrl } = await getStorage(['backendUrl']);
-    const base = (backendUrl || 'http://localhost:3000').replace(/\/$/, '');
-    const resp = await fetch(`${base}/api/clip/await?active=1`, { credentials: 'include' });
-    if (!resp.ok) { return; }
+    const statusEl = document.getElementById("status");
+    const { backendUrl } = await getStorage(["backendUrl"]);
+    const base = (backendUrl || "http://localhost:3000").replace(/\/$/, "");
+    const resp = await fetch(`${base}/api/clip/await?active=1`, { credentials: "include" });
+    if (!resp.ok) {
+      return;
+    }
     const j = await resp.json().catch(() => ({}));
     const saves = Array.isArray(j?.saves) ? j.saves : [];
     if (!saves.length) {
-      el.innerHTML = '';
+      el.innerHTML = "";
       // If the main status still shows a running message, keep it; else nothing
       return;
     }
-    const rows = saves.map((s) => {
-      const db = s.database_id ? ` • ${String(s.database_id).slice(0,6)}…` : '';
-      const started = s.started_at ? new Date(s.started_at) : null;
-      const time = started ? started.toLocaleTimeString() : '';
-      const icon = s.status === 'running' ? '<span class="spinner" aria-hidden="true"></span>' : '⏳';
-      const title = s.title ? `<strong>${s.title}</strong>` : '<strong>Saving…</strong>';
-      return `<div class="active-run">${icon} ${title} <span style="color:#6b7280">${s.status}${db}${time ? ` • ${time}` : ''}</span></div>`;
-    }).join('');
+    const rows = saves
+      .map((s) => {
+        const db = s.database_id ? ` • ${String(s.database_id).slice(0, 6)}…` : "";
+        const started = s.started_at ? new Date(s.started_at) : null;
+        const time = started ? started.toLocaleTimeString() : "";
+        const icon =
+          s.status === "running" ? '<span class="spinner" aria-hidden="true"></span>' : "⏳";
+        const title = s.title ? `<strong>${s.title}</strong>` : "<strong>Saving…</strong>";
+        return `<div class="active-run">${icon} ${title} <span style="color:#6b7280">${s.status}${db}${time ? ` • ${time}` : ""}</span></div>`;
+      })
+      .join("");
     const html = `<div style="margin-top:8px"><div style="font-weight:600;color:#374151;margin-bottom:2px">Active saves</div>${rows}</div>`;
     if (html !== lastActiveRunsHtml) {
       el.innerHTML = html;
@@ -488,114 +567,155 @@ async function fetchActiveRunsOnce() {
 }
 
 function startActiveRunsPolling() {
-  try { stopActiveRunsPolling(); } catch {}
+  try {
+    stopActiveRunsPolling();
+  } catch {}
   fetchActiveRunsOnce();
   activeRunsTimer = setInterval(fetchActiveRunsOnce, 2000);
 }
 
 function stopActiveRunsPolling(opts = {}) {
-  if (activeRunsTimer) { clearInterval(activeRunsTimer); activeRunsTimer = null; }
+  if (activeRunsTimer) {
+    clearInterval(activeRunsTimer);
+    activeRunsTimer = null;
+  }
   const { delayClearMs } = opts || {};
-  const el = document.getElementById('activeRuns');
+  const el = document.getElementById("activeRuns");
   if (!el) return;
-  if (typeof delayClearMs === 'number' && delayClearMs > 0) {
-    setTimeout(() => { if (!activeRunsTimer) { el.innerHTML = ''; lastActiveRunsHtml = ''; } }, delayClearMs);
+  if (typeof delayClearMs === "number" && delayClearMs > 0) {
+    setTimeout(() => {
+      if (!activeRunsTimer) {
+        el.innerHTML = "";
+        lastActiveRunsHtml = "";
+      }
+    }, delayClearMs);
   } else {
-    el.innerHTML = '';
-    lastActiveRunsHtml = '';
+    el.innerHTML = "";
+    lastActiveRunsHtml = "";
   }
 }
 
 async function loadDatabases() {
   console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Loading databases…`);
-  const stored = await getStorage(['recentSaves', 'lastDatabaseId']);
-  const result = await listDatabases('');
+  const stored = await getStorage(["recentSaves", "lastDatabaseId"]);
+  const result = await listDatabases("");
   const merged = Array.isArray(result?.items) ? result.items : [];
   dbList = merged.slice();
-  
+
   // Order by recent usage; boost lastDatabaseId
-  dbList = orderDatabasesByRecentUsage(dbList, stored.recentSaves || [], stored.lastDatabaseId || '');
+  dbList = orderDatabasesByRecentUsage(
+    dbList,
+    stored.recentSaves || [],
+    stored.lastDatabaseId || "",
+  );
   dbFiltered = dbList.slice();
   renderDbList(dbFiltered);
   attachComboboxHandlers();
   // Options page refresh button
   try {
-    const refreshBtn = document.getElementById('dbIndexRefresh');
-    if (refreshBtn) refreshBtn.addEventListener('click', async () => {
-      const status = document.getElementById('tokensStatus');
-      if (status) { status.textContent = 'Refreshing databases…'; status.classList.remove('success'); }
-      try {
-        const r = await chrome.runtime.sendMessage({ type: 'REINDEX_DATABASES' });
-        if (!r?.ok) throw new Error(r?.error || 'Failed to refresh');
-        if (status) { status.textContent = 'Refresh enqueued ✓'; status.classList.add('success'); }
-        setTimeout(async () => {
-          const result2 = await listDatabases('');
-          dbList = Array.isArray(result2?.items) ? result2.items : [];
-          dbFiltered = dbList.slice();
-          renderDbList(dbFiltered);
-          const pre2 = (dbSelectedId && dbList.find((d) => d.id === dbSelectedId)) ? dbSelectedId : (dbList[0]?.id || '');
-          setSelectedDb(pre2);
-        }, 600);
-      } catch (e) {
-        if (status) status.textContent = String(e?.message || e);
-      }
-    });
+    const refreshBtn = document.getElementById("dbIndexRefresh");
+    if (refreshBtn)
+      refreshBtn.addEventListener("click", async () => {
+        const status = document.getElementById("tokensStatus");
+        if (status) {
+          status.textContent = "Refreshing databases…";
+          status.classList.remove("success");
+        }
+        try {
+          const r = await chrome.runtime.sendMessage({ type: "REINDEX_DATABASES" });
+          if (!r?.ok) throw new Error(r?.error || "Failed to refresh");
+          if (status) {
+            status.textContent = "Refresh enqueued ✓";
+            status.classList.add("success");
+          }
+          setTimeout(async () => {
+            const result2 = await listDatabases("");
+            dbList = Array.isArray(result2?.items) ? result2.items : [];
+            dbFiltered = dbList.slice();
+            renderDbList(dbFiltered);
+            const pre2 =
+              dbSelectedId && dbList.find((d) => d.id === dbSelectedId)
+                ? dbSelectedId
+                : dbList[0]?.id || "";
+            setSelectedDb(pre2);
+          }, 600);
+        } catch (e) {
+          if (status) status.textContent = String(e?.message || e);
+        }
+      });
   } catch {}
   // Preselect last used or first
-  const pre = stored.lastDatabaseId && dbList.find((d) => d.id === stored.lastDatabaseId) ? stored.lastDatabaseId : (dbList[0]?.id || '');
+  const pre =
+    stored.lastDatabaseId && dbList.find((d) => d.id === stored.lastDatabaseId)
+      ? stored.lastDatabaseId
+      : dbList[0]?.id || "";
   setSelectedDb(pre);
-  
+
   // Restore label if nothing selected
   if (!pre) {
-    try { const { label } = getDbElements(); if (label) label.textContent = 'Select database...'; } catch {}
+    try {
+      const { label } = getDbElements();
+      if (label) label.textContent = "Select database...";
+    } catch {}
   }
   // Reveal dependent UI only after databases are ready
   try {
-    const noteRow = document.getElementById('noteRow');
-    const customSaveRow = document.getElementById('customSaveRow');
-    const saveRow = document.getElementById('saveRow');
-    if (noteRow) noteRow.style.display = 'none'; // start collapsed by default
-    if (customSaveRow) customSaveRow.style.display = 'block';
-    if (saveRow) saveRow.style.display = 'flex';
+    const noteRow = document.getElementById("noteRow");
+    const customSaveRow = document.getElementById("customSaveRow");
+    const saveRow = document.getElementById("saveRow");
+    if (noteRow) noteRow.style.display = "none"; // start collapsed by default
+    if (customSaveRow) customSaveRow.style.display = "block";
+    if (saveRow) saveRow.style.display = "flex";
   } catch {}
-  console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Databases loaded:`, dbList.length);
+  console.log(
+    `[NotionMagicClipper][Popup ${new Date().toISOString()}] Databases loaded:`,
+    dbList.length,
+  );
 }
 
 async function getPageContext(tabId) {
   try {
-    const res = await chrome.tabs.sendMessage(tabId, { type: 'GET_PAGE_CONTEXT' });
-    if (!res?.ok) throw new Error(res?.error || 'Could not get page context');
+    const res = await chrome.tabs.sendMessage(tabId, { type: "GET_PAGE_CONTEXT" });
+    if (!res?.ok) throw new Error(res?.error || "Could not get page context");
     return res.context;
   } catch (err) {
-    const msg = String(err?.message || err || '');
-    const receivingEnd = msg.includes('Receiving end does not exist') || msg.includes('Could not establish connection');
+    const msg = String(err?.message || err || "");
+    const receivingEnd =
+      msg.includes("Receiving end does not exist") ||
+      msg.includes("Could not establish connection");
     if (!receivingEnd) throw err;
     // Fallback: inject vendor readability and content script in order, then retry
-    await chrome.scripting.executeScript({ target: { tabId }, files: [
-      'vendor/readability/JSDOMParser.js',
-      'vendor/readability/Readability.js',
-      'vendor/readability/Readability-readerable.js',
-      'contentScript.js'
-    ] });
-    const res2 = await chrome.tabs.sendMessage(tabId, { type: 'GET_PAGE_CONTEXT' });
-    if (!res2?.ok) throw new Error(res2?.error || 'Could not get context after injecting content script');
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: [
+        "vendor/readability/JSDOMParser.js",
+        "vendor/readability/Readability.js",
+        "vendor/readability/Readability-readerable.js",
+        "contentScript.js",
+      ],
+    });
+    const res2 = await chrome.tabs.sendMessage(tabId, { type: "GET_PAGE_CONTEXT" });
+    if (!res2?.ok)
+      throw new Error(res2?.error || "Could not get context after injecting content script");
     return res2.context;
   }
 }
 
 async function save() {
-  const status = document.getElementById('status');
-  status.textContent = '';
-  const { llmProvider, llmModel } = await getStorage(['llmProvider', 'llmModel']);
+  const status = document.getElementById("status");
+  status.textContent = "";
+  const { llmProvider, llmModel } = await getStorage(["llmProvider", "llmModel"]);
   const databaseId = dbSelectedId;
   if (!databaseId) {
-    status.textContent = 'Debes seleccionar una base de datos.';
+    status.textContent = "Debes seleccionar una base de datos.";
     return;
   }
   // Record when the save was initiated by the user
   const startedAt = Date.now();
   const tab = await getCurrentTab();
-  console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Save clicked. Getting page context…`);
+  console.log(
+    `[NotionMagicClipper][Popup ${new Date().toISOString()}] Save clicked. Getting page context…`,
+  );
   let context;
   try {
     context = await getPageContext(tab.id);
@@ -605,48 +725,65 @@ async function save() {
   }
   (function logContext(ctx) {
     try {
-      console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Page context (full):`, structuredClone(ctx));
+      console.log(
+        `[NotionMagicClipper][Popup ${new Date().toISOString()}] Page context (full):`,
+        structuredClone(ctx),
+      );
     } catch {
-      console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Page context (full):`, ctx);
+      console.log(
+        `[NotionMagicClipper][Popup ${new Date().toISOString()}] Page context (full):`,
+        ctx,
+      );
     }
-    console.log(
-      `[NotionMagicClipper][Popup ${new Date().toISOString()}] Context counts:`,
-      {
-        headings: ctx.headings?.length || 0,
-        listItems: ctx.listItems?.length || 0,
-        shortSpans: ctx.shortSpans?.length || 0,
-        attrTexts: ctx.attrTexts?.length || 0,
-        images: ctx.images?.length || 0
-      }
-    );
+    console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Context counts:`, {
+      headings: ctx.headings?.length || 0,
+      listItems: ctx.listItems?.length || 0,
+      shortSpans: ctx.shortSpans?.length || 0,
+      attrTexts: ctx.attrTexts?.length || 0,
+      images: ctx.images?.length || 0,
+    });
   })(context);
-  const label = formatModelLabel(llmProvider || 'openai', llmModel || 'gpt-5-nano');
+  const label = formatModelLabel(llmProvider || "openai", llmModel || "gpt-5-nano");
   status.textContent = `Analyzing content with ${label} and saving to Notion...`;
-  try { startActiveRunsPolling(); } catch {}
-  console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Got page context. Sending SAVE_TO_NOTION…`);
-  const note = document.getElementById('note').value.trim();
+  try {
+    startActiveRunsPolling();
+  } catch {}
+  console.log(
+    `[NotionMagicClipper][Popup ${new Date().toISOString()}] Got page context. Sending SAVE_TO_NOTION…`,
+  );
+  const note = document.getElementById("note").value.trim();
   const res = await chrome.runtime.sendMessage({
-    type: 'SAVE_TO_NOTION',
+    type: "SAVE_TO_NOTION",
     databaseId,
     pageContext: context,
     note,
     startedAt,
     llmProvider,
-    llmModel
+    llmModel,
   });
   if (!res?.ok) {
     console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Save failed:`, res?.error);
-    status.innerHTML = `<span class="error">${res?.error || 'Error saving'}</span>`;
-    try { stopActiveRunsPolling(); } catch {}
+    status.innerHTML = `<span class="error">${res?.error || "Error saving"}</span>`;
+    try {
+      stopActiveRunsPolling();
+    } catch {}
     return;
   }
-  console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Save success. Page created.`);
+  console.log(
+    `[NotionMagicClipper][Popup ${new Date().toISOString()}] Save success. Page created.`,
+  );
   const pageUrl = res?.page?.url || res?.page?.public_url;
   const seconds = Math.max(0, Math.round((Date.now() - startedAt) / 1000));
-  status.innerHTML = `<span class="success">Saved successfully in ${seconds} seconds ✅</span>` + (pageUrl ? `<div class="success-link"><a href="${pageUrl}" target="_blank" rel="noopener noreferrer">Open in Notion ↗</a></div>` : '');
+  status.innerHTML =
+    `<span class="success">Saved successfully in ${seconds} seconds ✅</span>` +
+    (pageUrl
+      ? `<div class="success-link"><a href="${pageUrl}" target="_blank" rel="noopener noreferrer">Open in Notion ↗</a></div>`
+      : "");
   // Remember last used database for next session and ordering boost
   await setStorage({ lastDatabaseId: databaseId });
-  try { stopActiveRunsPolling({ delayClearMs: 2000 }); } catch {}
+  try {
+    stopActiveRunsPolling({ delayClearMs: 2000 });
+  } catch {}
 }
 
 async function main() {
@@ -654,335 +791,385 @@ async function main() {
   await loadDatabases();
 
   // removed top search/refresh controls
-  document.getElementById('save').addEventListener('click', save);
+  document.getElementById("save").addEventListener("click", save);
   // full Options link moved to tokens view
 
   // Inline tokens mini-page
-  const indicator = document.getElementById('statusIndicator');
-  const tokensView = document.getElementById('tokensView');
-  const tokensBack = document.getElementById('tokensBack');
-  const tokensSave = document.getElementById('tokensSave');
+  const indicator = document.getElementById("statusIndicator");
+  const tokensView = document.getElementById("tokensView");
+  const tokensBack = document.getElementById("tokensBack");
+  const tokensSave = document.getElementById("tokensSave");
   const startNotionOAuth = null; // removed explicit button; login flow chains to connect
-  const startNotionLogin = document.getElementById('startNotionLogin');
-  const fetchTokenFromBackend = document.getElementById('fetchTokenFromBackend');
-  const tokensStatus = document.getElementById('tokensStatus');
-  const tModel = document.getElementById('tModel');
-  const appView = document.getElementById('app');
-  const tokensClear = document.getElementById('tokensClear');
-  const dbSettingsView = document.getElementById('dbSettingsView');
+  const startNotionLogin = document.getElementById("startNotionLogin");
+  const fetchTokenFromBackend = document.getElementById("fetchTokenFromBackend");
+  const tokensStatus = document.getElementById("tokensStatus");
+  const tModel = document.getElementById("tModel");
+  const appView = document.getElementById("app");
+  const tokensClear = document.getElementById("tokensClear");
+  const dbSettingsView = document.getElementById("dbSettingsView");
   // Track the last visible view to return from history
-  let lastView = 'app';
-  const openDbSettings = document.getElementById('openDbSettings');
-  const dbsBack = document.getElementById('dbsBack');
-  const dbsSave = document.getElementById('dbsSave');
-  const dbsClear = document.getElementById('dbsClear');
-  const dbsStatus = document.getElementById('dbsStatus');
-  const dbsPrompt = document.getElementById('dbsPrompt');
-  const dbsSaveArticle = document.getElementById('dbsSaveArticle');
-  const dbsCustomize = document.getElementById('dbsCustomize');
-  const dbsCustomizeLabel = document.getElementById('dbsCustomizeLabel');
-  const dbsContentPrompt = document.getElementById('dbsContentPrompt');
-  const dbSettingsDbName = document.getElementById('dbSettingsDbName');
+  let lastView = "app";
+  const openDbSettings = document.getElementById("openDbSettings");
+  const dbsBack = document.getElementById("dbsBack");
+  const dbsSave = document.getElementById("dbsSave");
+  const dbsClear = document.getElementById("dbsClear");
+  const dbsStatus = document.getElementById("dbsStatus");
+  const dbsPrompt = document.getElementById("dbsPrompt");
+  const dbsSaveArticle = document.getElementById("dbsSaveArticle");
+  const dbsCustomize = document.getElementById("dbsCustomize");
+  const dbsCustomizeLabel = document.getElementById("dbsCustomizeLabel");
+  const dbsContentPrompt = document.getElementById("dbsContentPrompt");
+  const dbSettingsDbName = document.getElementById("dbSettingsDbName");
   if (indicator) {
-    indicator.addEventListener('click', async () => { await openTokensView(); });
+    indicator.addEventListener("click", async () => {
+      await openTokensView();
+    });
   }
-  if (tokensBack) tokensBack.addEventListener('click', async () => {
-    tokensView.style.display = 'none';
-    appView.style.display = 'block';
-    if (needsReloadDatabases) {
-      needsReloadDatabases = false;
-      await loadDatabases();
-    }
-  });
-  if (tokensClear) tokensClear.addEventListener('click', async () => {
-    try {
+  if (tokensBack)
+    tokensBack.addEventListener("click", async () => {
+      tokensView.style.display = "none";
+      appView.style.display = "block";
+      if (needsReloadDatabases) {
+        needsReloadDatabases = false;
+        await loadDatabases();
+      }
+    });
+  if (tokensClear)
+    tokensClear.addEventListener("click", async () => {
+      try {
+        await setStorage({
+          notionToken: "",
+          workspaceTokens: {},
+          workspaceId: "",
+          llmProvider: "openai",
+          llmModel: "gpt-5-nano",
+          databaseSettings: {},
+          databasePrompts: {},
+          recentSaves: [],
+          lastDatabaseId: "",
+        });
+        tokensStatus.textContent = "Local data cleared ✓";
+        tokensStatus.classList.add("success");
+        await precheck({ preserveViews: true });
+        needsReloadDatabases = true;
+      } catch (e) {
+        tokensStatus.textContent = "Failed to clear";
+      }
+    });
+  if (tokensSave)
+    tokensSave.addEventListener("click", async () => {
+      tokensStatus.textContent = "";
+      tokensStatus.classList.remove("success");
+      const notionToken = document.getElementById("tNotionToken")?.value?.trim() || "";
+      const backendUrl = document.getElementById("tBackendUrl").value.trim();
+      const workspaceId = document.getElementById("tWorkspaceId").value.trim();
+      const [provider, ...rest] = String(tModel?.value || "openai:gpt-5-nano").split(":");
+      const llmProvider = provider || "openai";
+      const llmModel = rest.join(":") || "gpt-5-nano";
+      const gpt5Reasoning = document.getElementById("tGpt5Reasoning")?.value || "low";
+      const gpt5Verbosity = document.getElementById("tGpt5Verbosity")?.value || "low";
       await setStorage({
-        notionToken: '',
-        workspaceTokens: {},
-        workspaceId: '',
-        llmProvider: 'openai',
-        llmModel: 'gpt-5-nano',
-        databaseSettings: {},
-        databasePrompts: {},
-        recentSaves: [],
-        lastDatabaseId: ''
+        notionToken,
+        llmProvider,
+        llmModel,
+        backendUrl,
+        workspaceId,
+        openai_reasoning_effort: gpt5Reasoning,
+        openai_verbosity: gpt5Verbosity,
       });
-      tokensStatus.textContent = 'Local data cleared ✓';
-      tokensStatus.classList.add('success');
+      tokensStatus.textContent = "Saved ✓";
+      tokensStatus.classList.add("success");
       await precheck({ preserveViews: true });
       needsReloadDatabases = true;
-    } catch (e) {
-      tokensStatus.textContent = 'Failed to clear';
-    }
-  });
-  if (tokensSave) tokensSave.addEventListener('click', async () => {
-    tokensStatus.textContent = '';
-    tokensStatus.classList.remove('success');
-    const notionToken = document.getElementById('tNotionToken')?.value?.trim() || '';
-    const backendUrl = document.getElementById('tBackendUrl').value.trim();
-    const workspaceId = document.getElementById('tWorkspaceId').value.trim();
-    const [provider, ...rest] = String(tModel?.value || 'openai:gpt-5-nano').split(':');
-    const llmProvider = provider || 'openai';
-    const llmModel = rest.join(':') || 'gpt-5-nano';
-    const gpt5Reasoning = document.getElementById('tGpt5Reasoning')?.value || 'low';
-    const gpt5Verbosity = document.getElementById('tGpt5Verbosity')?.value || 'low';
-    await setStorage({
-      notionToken,
-      llmProvider,
-      llmModel,
-      backendUrl,
-      workspaceId,
-      openai_reasoning_effort: gpt5Reasoning,
-      openai_verbosity: gpt5Verbosity,
     });
-    tokensStatus.textContent = 'Saved ✓';
-    tokensStatus.classList.add('success');
-    await precheck({ preserveViews: true });
-    needsReloadDatabases = true;
-  });
 
   async function ensureLoggedIn(base) {
     try {
-      const res = await fetch(`${base}/api/notion/workspaces`, { credentials: 'include' });
+      const res = await fetch(`${base}/api/notion/workspaces`, { credentials: "include" });
       return res.status !== 401;
-    } catch { return false; }
+    } catch {
+      return false;
+    }
   }
 
   // no-op: connect step is chained after login callback
 
-  if (startNotionLogin) startNotionLogin.addEventListener('click', async () => {
-    const { backendUrl } = await getStorage(['backendUrl']);
-    const base = backendUrl || 'https://magic-clipper.vercel.app';
-    const url = String(base).replace(/\/$/, '') + '/api/auth/notion/start';
-    try {
-      // Create the auth tab
-      const tab = await chrome.tabs.create({ url, active: true });
-      // Poll the session endpoint if Supabase redirects with access_token in URL.
-      const poll = setInterval(async () => {
-        try {
-          const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-          const current = tabs && tabs[0];
-          if (!current || !current.url) return;
-          if (current.url.includes('/auth/callback') && current.url.includes('access_token=')) {
-            try {
-              const u = new URL(current.url);
-              const access_token = u.searchParams.get('access_token');
-              if (access_token) {
-                await fetch(`${base.replace(/\/$/, '')}/api/auth/session`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ access_token }), credentials: 'include' });
-                await refreshAccountAndWorkspaces();
-              }
-            } catch {}
-          }
-        } catch {}
-      }, 1000);
-      setTimeout(() => clearInterval(poll), 20000);
-    } catch {
-      window.open(url, '_blank', 'noopener,noreferrer');
-    }
-  });
+  if (startNotionLogin)
+    startNotionLogin.addEventListener("click", async () => {
+      const { backendUrl } = await getStorage(["backendUrl"]);
+      const base = backendUrl || "https://magic-clipper.vercel.app";
+      const url = String(base).replace(/\/$/, "") + "/api/auth/notion/start";
+      try {
+        // Create the auth tab
+        const tab = await chrome.tabs.create({ url, active: true });
+        // Poll the session endpoint if Supabase redirects with access_token in URL.
+        const poll = setInterval(async () => {
+          try {
+            const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+            const current = tabs && tabs[0];
+            if (!current || !current.url) return;
+            if (current.url.includes("/auth/callback") && current.url.includes("access_token=")) {
+              try {
+                const u = new URL(current.url);
+                const access_token = u.searchParams.get("access_token");
+                if (access_token) {
+                  await fetch(`${base.replace(/\/$/, "")}/api/auth/session`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ access_token }),
+                    credentials: "include",
+                  });
+                  await refreshAccountAndWorkspaces();
+                }
+              } catch {}
+            }
+          } catch {}
+        }, 1000);
+        setTimeout(() => clearInterval(poll), 20000);
+      } catch {
+        window.open(url, "_blank", "noopener,noreferrer");
+      }
+    });
 
-  if (connectWorkspaceBtn) connectWorkspaceBtn.addEventListener('click', async () => {
-    console.log('[NotionMagicClipper][Popup] Connect another workspace clicked');
-    const { backendUrl } = await getStorage(['backendUrl']);
-    const base = (backendUrl || 'https://magic-clipper.vercel.app').replace(/\/$/, '');
-    const startUrl = base + '/api/notion/start';
-    try { await chrome.tabs.create({ url: startUrl, active: true }); }
-    catch { window.open(startUrl, '_blank', 'noopener,noreferrer'); }
-  });
+  if (connectWorkspaceBtn)
+    connectWorkspaceBtn.addEventListener("click", async () => {
+      console.log("[NotionMagicClipper][Popup] Connect another workspace clicked");
+      const { backendUrl } = await getStorage(["backendUrl"]);
+      const base = (backendUrl || "https://magic-clipper.vercel.app").replace(/\/$/, "");
+      const startUrl = base + "/api/notion/start";
+      try {
+        await chrome.tabs.create({ url: startUrl, active: true });
+      } catch {
+        window.open(startUrl, "_blank", "noopener,noreferrer");
+      }
+    });
 
   // Toggle extra context
-  const toggleNoteBtn = document.getElementById('toggleNoteBtn');
-  if (toggleNoteBtn) toggleNoteBtn.addEventListener('click', () => {
-    const noteRow = document.getElementById('noteRow');
-    if (!noteRow) return;
-    const shown = getComputedStyle(noteRow).display !== 'none';
-    noteRow.style.display = shown ? 'none' : 'block';
-  });
+  const toggleNoteBtn = document.getElementById("toggleNoteBtn");
+  if (toggleNoteBtn)
+    toggleNoteBtn.addEventListener("click", () => {
+      const noteRow = document.getElementById("noteRow");
+      if (!noteRow) return;
+      const shown = getComputedStyle(noteRow).display !== "none";
+      noteRow.style.display = shown ? "none" : "block";
+    });
 
-  if (logoutBtn) logoutBtn.addEventListener('click', async (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    try {
-      console.log('[NotionMagicClipper][Popup] Logout clicked');
-      const { backendUrl } = await getStorage(['backendUrl']);
-      const base = (backendUrl || 'https://magic-clipper.vercel.app').replace(/\/$/, '');
-      const resp = await fetch(`${base}/api/auth/logout`, { method: 'POST', credentials: 'include' });
-      console.log('[NotionMagicClipper][Popup] Logout response', resp.status);
-      await setStorage({ workspaceTokens: {}, notionToken: '' });
-      if (accountInfo) accountInfo.textContent = 'Not logged in';
-      logoutBtn.style.display = 'none';
-      tokensStatus.textContent = 'Logged out';
-      const list = document.getElementById('linkedWorkspaces');
-      if (list) list.innerHTML = '<li style="color:#999">No workspaces (not logged in)</li>';
-      if (connectWorkspaceBtn) connectWorkspaceBtn.style.display = 'none';
-      if (startNotionLogin) startNotionLogin.style.display = 'inline-flex';
-      await refreshAccountAndWorkspaces();
-    } catch {}
-  });
+  if (logoutBtn)
+    logoutBtn.addEventListener("click", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        console.log("[NotionMagicClipper][Popup] Logout clicked");
+        const { backendUrl } = await getStorage(["backendUrl"]);
+        const base = (backendUrl || "https://magic-clipper.vercel.app").replace(/\/$/, "");
+        const resp = await fetch(`${base}/api/auth/logout`, {
+          method: "POST",
+          credentials: "include",
+        });
+        console.log("[NotionMagicClipper][Popup] Logout response", resp.status);
+        await setStorage({ workspaceTokens: {}, notionToken: "" });
+        if (accountInfo) accountInfo.textContent = "Not logged in";
+        logoutBtn.style.display = "none";
+        tokensStatus.textContent = "Logged out";
+        const list = document.getElementById("linkedWorkspaces");
+        if (list) list.innerHTML = '<li style="color:#999">No workspaces (not logged in)</li>';
+        if (connectWorkspaceBtn) connectWorkspaceBtn.style.display = "none";
+        if (startNotionLogin) startNotionLogin.style.display = "inline-flex";
+        await refreshAccountAndWorkspaces();
+      } catch {}
+    });
 
   async function handleFetchTokenFromBackend() {
-    console.log('[NotionMagicClipper][Popup] Fetch from backend clicked');
-    if (tokensStatus) tokensStatus.textContent = 'Fetching token from backend…';
-    const { backendUrl } = await getStorage(['backendUrl']);
-    let wsId = (document.getElementById('tWorkspaceId')?.value || '').trim();
-    const base = (backendUrl || 'https://magic-clipper.vercel.app').replace(/\/$/, '');
+    console.log("[NotionMagicClipper][Popup] Fetch from backend clicked");
+    if (tokensStatus) tokensStatus.textContent = "Fetching token from backend…";
+    const { backendUrl } = await getStorage(["backendUrl"]);
+    let wsId = (document.getElementById("tWorkspaceId")?.value || "").trim();
+    const base = (backendUrl || "https://magic-clipper.vercel.app").replace(/\/$/, "");
     if (!wsId) {
       try {
         const tab = await getCurrentTab();
-        const u = new URL(tab?.url || '');
-        const fromTab = u.searchParams.get('workspace_id');
+        const u = new URL(tab?.url || "");
+        const fromTab = u.searchParams.get("workspace_id");
         if (fromTab) {
           wsId = fromTab;
-          const input = document.getElementById('tWorkspaceId');
+          const input = document.getElementById("tWorkspaceId");
           if (input) input.value = wsId;
           await setStorage({ workspaceId: wsId });
         }
       } catch {}
     }
-    if (!wsId) { if (tokensStatus) tokensStatus.textContent = 'Enter workspace ID from the redirect URL (tip: open the /connected tab and click this again).'; return; }
+    if (!wsId) {
+      if (tokensStatus)
+        tokensStatus.textContent =
+          "Enter workspace ID from the redirect URL (tip: open the /connected tab and click this again).";
+      return;
+    }
     const url = `${base}/api/notion/token?workspace_id=${encodeURIComponent(wsId)}`;
-    console.log('[NotionMagicClipper][Popup] Fetch URL:', url);
+    console.log("[NotionMagicClipper][Popup] Fetch URL:", url);
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 10000);
-      const resp = await fetch(url, { method: 'GET', signal: controller.signal });
+      const resp = await fetch(url, { method: "GET", signal: controller.signal });
       clearTimeout(timeout);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const json = await resp.json();
-      if (!json?.access_token) throw new Error('Token not found for this workspace');
-      document.getElementById('tNotionToken').value = json.access_token;
+      if (!json?.access_token) throw new Error("Token not found for this workspace");
+      document.getElementById("tNotionToken").value = json.access_token;
       await setStorage({ notionToken: json.access_token, workspaceId: wsId });
-      if (tokensStatus) { tokensStatus.textContent = 'Fetched from backend ✓'; tokensStatus.classList.add('success'); }
+      if (tokensStatus) {
+        tokensStatus.textContent = "Fetched from backend ✓";
+        tokensStatus.classList.add("success");
+      }
       await precheck({ preserveViews: true });
       needsReloadDatabases = true;
     } catch (e) {
-      console.error('[NotionMagicClipper][Popup] Fetch from backend failed', e);
+      console.error("[NotionMagicClipper][Popup] Fetch from backend failed", e);
       if (tokensStatus) tokensStatus.textContent = `Fetch failed: ${String(e?.message || e)}`;
     }
   }
-  if (fetchTokenFromBackend) fetchTokenFromBackend.addEventListener('click', handleFetchTokenFromBackend);
-  try { window.fetchFromBackend = handleFetchTokenFromBackend; } catch {}
+  if (fetchTokenFromBackend)
+    fetchTokenFromBackend.addEventListener("click", handleFetchTokenFromBackend);
+  try {
+    window.fetchFromBackend = handleFetchTokenFromBackend;
+  } catch {}
 
   // Database settings mini-page
   function updateCustomizeVisibility() {
     if (!dbsSaveArticle || !dbsCustomize || !dbsCustomizeLabel || !dbsContentPrompt) return;
     const checked = dbsSaveArticle.checked;
-    dbsCustomizeLabel.style.display = checked ? 'flex' : 'none';
-    dbsContentPrompt.style.display = (checked && dbsCustomize.checked) ? 'block' : 'none';
+    dbsCustomizeLabel.style.display = checked ? "flex" : "none";
+    dbsContentPrompt.style.display = checked && dbsCustomize.checked ? "block" : "none";
   }
-  if (dbsSaveArticle) dbsSaveArticle.addEventListener('change', updateCustomizeVisibility);
-  if (dbsCustomize) dbsCustomize.addEventListener('change', updateCustomizeVisibility);
-  if (openDbSettings) openDbSettings.addEventListener('click', async () => {
-    dbsStatus.textContent = '';
-    const currentDb = dbList.find((d) => d.id === dbSelectedId);
-    // clickable link to Notion database
-    if (currentDb && currentDb.url) {
-      dbSettingsDbName.innerHTML = `<a href="${currentDb.url}" target="_blank" rel="noopener noreferrer">${currentDb.iconEmoji ? currentDb.iconEmoji + ' ' : ''}${currentDb.title} ↗</a>`;
-    } else {
-      dbSettingsDbName.textContent = currentDb ? `${currentDb.iconEmoji ? currentDb.iconEmoji + ' ' : ''}${currentDb.title}` : '';
-    }
-    const { databaseSettings } = await getStorage(['databaseSettings']);
-    const settingsForDb = (databaseSettings || {})[dbSelectedId] || {};
-    dbsPrompt.value = settingsForDb.prompt || '';
-    dbsSaveArticle.checked = settingsForDb.saveArticle !== false;
-    dbsCustomize.checked = settingsForDb.customizeContent === true;
-    dbsContentPrompt.value = settingsForDb.contentPrompt || '';
-    updateCustomizeVisibility();
-    appView.style.display = 'none';
-    dbSettingsView.style.display = 'block';
-  });
-  if (dbsBack) dbsBack.addEventListener('click', () => { dbSettingsView.style.display = 'none'; appView.style.display = 'block'; });
-  if (dbsSave) dbsSave.addEventListener('click', async () => {
-    const { databaseSettings } = await getStorage(['databaseSettings']);
-    const map = (databaseSettings && typeof databaseSettings === 'object') ? databaseSettings : {};
-    map[dbSelectedId] = {
-      prompt: (dbsPrompt.value || '').trim(),
-      saveArticle: !!dbsSaveArticle.checked,
-      customizeContent: !!dbsCustomize.checked,
-      contentPrompt: (dbsContentPrompt.value || '').trim()
-    };
-    await setStorage({ databaseSettings: map });
-    dbsStatus.textContent = 'Saved ✓';
-    dbsStatus.classList.add('success');
-  });
-  if (dbsClear) dbsClear.addEventListener('click', async () => {
-    const { databaseSettings } = await getStorage(['databaseSettings']);
-    const map = (databaseSettings && typeof databaseSettings === 'object') ? databaseSettings : {};
-    map[dbSelectedId] = { prompt: '', saveArticle: true, customizeContent: false, contentPrompt: '' };
-    await setStorage({ databaseSettings: map });
-    dbsPrompt.value = '';
-    dbsSaveArticle.checked = true;
-    dbsCustomize.checked = false;
-    dbsContentPrompt.value = '';
-    updateCustomizeVisibility();
-    dbsStatus.textContent = 'Cleared';
-    dbsStatus.classList.remove('success');
-  });
+  if (dbsSaveArticle) dbsSaveArticle.addEventListener("change", updateCustomizeVisibility);
+  if (dbsCustomize) dbsCustomize.addEventListener("change", updateCustomizeVisibility);
+  if (openDbSettings)
+    openDbSettings.addEventListener("click", async () => {
+      dbsStatus.textContent = "";
+      const currentDb = dbList.find((d) => d.id === dbSelectedId);
+      // clickable link to Notion database
+      if (currentDb && currentDb.url) {
+        dbSettingsDbName.innerHTML = `<a href="${currentDb.url}" target="_blank" rel="noopener noreferrer">${currentDb.iconEmoji ? currentDb.iconEmoji + " " : ""}${currentDb.title} ↗</a>`;
+      } else {
+        dbSettingsDbName.textContent = currentDb
+          ? `${currentDb.iconEmoji ? currentDb.iconEmoji + " " : ""}${currentDb.title}`
+          : "";
+      }
+      const { databaseSettings } = await getStorage(["databaseSettings"]);
+      const settingsForDb = (databaseSettings || {})[dbSelectedId] || {};
+      dbsPrompt.value = settingsForDb.prompt || "";
+      dbsSaveArticle.checked = settingsForDb.saveArticle !== false;
+      dbsCustomize.checked = settingsForDb.customizeContent === true;
+      dbsContentPrompt.value = settingsForDb.contentPrompt || "";
+      updateCustomizeVisibility();
+      appView.style.display = "none";
+      dbSettingsView.style.display = "block";
+    });
+  if (dbsBack)
+    dbsBack.addEventListener("click", () => {
+      dbSettingsView.style.display = "none";
+      appView.style.display = "block";
+    });
+  if (dbsSave)
+    dbsSave.addEventListener("click", async () => {
+      const { databaseSettings } = await getStorage(["databaseSettings"]);
+      const map = databaseSettings && typeof databaseSettings === "object" ? databaseSettings : {};
+      map[dbSelectedId] = {
+        prompt: (dbsPrompt.value || "").trim(),
+        saveArticle: !!dbsSaveArticle.checked,
+        customizeContent: !!dbsCustomize.checked,
+        contentPrompt: (dbsContentPrompt.value || "").trim(),
+      };
+      await setStorage({ databaseSettings: map });
+      dbsStatus.textContent = "Saved ✓";
+      dbsStatus.classList.add("success");
+    });
+  if (dbsClear)
+    dbsClear.addEventListener("click", async () => {
+      const { databaseSettings } = await getStorage(["databaseSettings"]);
+      const map = databaseSettings && typeof databaseSettings === "object" ? databaseSettings : {};
+      map[dbSelectedId] = {
+        prompt: "",
+        saveArticle: true,
+        customizeContent: false,
+        contentPrompt: "",
+      };
+      await setStorage({ databaseSettings: map });
+      dbsPrompt.value = "";
+      dbsSaveArticle.checked = true;
+      dbsCustomize.checked = false;
+      dbsContentPrompt.value = "";
+      updateCustomizeVisibility();
+      dbsStatus.textContent = "Cleared";
+      dbsStatus.classList.remove("success");
+    });
 
   // History view navigation
-  const openHistoryBtn = document.getElementById('openHistory');
-  const historyView = document.getElementById('historyView');
-  const historyList = document.getElementById('historyList');
-  const historyStatus = document.getElementById('historyStatus');
-  const backBtn = document.getElementById('backToMain');
-  const clearBtn = document.getElementById('clearHistory');
+  const openHistoryBtn = document.getElementById("openHistory");
+  const historyView = document.getElementById("historyView");
+  const historyList = document.getElementById("historyList");
+  const historyStatus = document.getElementById("historyStatus");
+  const backBtn = document.getElementById("backToMain");
+  const clearBtn = document.getElementById("clearHistory");
   // Untitled databases view
-  const openUntitledBtn = document.getElementById('openUntitled');
-  const untitledView = document.getElementById('untitledView');
-  const untitledList = document.getElementById('untitledList');
-  const untitledStatus = document.getElementById('untitledStatus');
-  const untitledBack = document.getElementById('untitledBack');
+  const openUntitledBtn = document.getElementById("openUntitled");
+  const untitledView = document.getElementById("untitledView");
+  const untitledList = document.getElementById("untitledList");
+  const untitledStatus = document.getElementById("untitledStatus");
+  const untitledBack = document.getElementById("untitledBack");
 
   async function loadHistory() {
-    historyStatus.textContent = '';
-    historyList.innerHTML = '';
+    historyStatus.textContent = "";
+    historyList.innerHTML = "";
     try {
-      const { backendUrl } = await getStorage(['backendUrl']);
-      const base = (backendUrl || 'http://localhost:3000').replace(/\/$/, '');
+      const { backendUrl } = await getStorage(["backendUrl"]);
+      const base = (backendUrl || "http://localhost:3000").replace(/\/$/, "");
       // Fetch recent rows for the logged-in user; backend endpoint supports recent=1 returning latest N
-      const resp = await fetch(`${base}/api/clip/await?recent=1`, { credentials: 'include' });
-      if (!resp.ok) throw new Error('fallback');
+      const resp = await fetch(`${base}/api/clip/await?recent=1`, { credentials: "include" });
+      if (!resp.ok) throw new Error("fallback");
       const j = await resp.json();
       const items = Array.isArray(j?.saves) ? j.saves : [];
-      if (!items.length) { historyStatus.textContent = 'No recent saves yet.'; return; }
+      if (!items.length) {
+        historyStatus.textContent = "No recent saves yet.";
+        return;
+      }
       for (const it of items) {
-        const li = document.createElement('li');
-        li.className = 'history-item';
-        const top = document.createElement('div');
-        top.className = 'hi-top';
-        const title = document.createElement('a');
-        title.className = 'hi-title';
-        title.href = it.notion_page_url || '#';
-        title.textContent = it.title || 'Untitled';
-        title.target = '_blank';
-        title.rel = 'noopener noreferrer';
+        const li = document.createElement("li");
+        li.className = "history-item";
+        const top = document.createElement("div");
+        top.className = "hi-top";
+        const title = document.createElement("a");
+        title.className = "hi-title";
+        title.href = it.notion_page_url || "#";
+        title.textContent = it.title || "Untitled";
+        title.target = "_blank";
+        title.rel = "noopener noreferrer";
         top.appendChild(title);
         if (it.source_url) {
-          const source = document.createElement('a');
-          source.className = 'hi-source';
-          source.href = it.source_url || '#';
-          source.textContent = '🔗';
-          source.title = 'open original source';
-          source.target = '_blank';
-          source.rel = 'noopener noreferrer';
+          const source = document.createElement("a");
+          source.className = "hi-source";
+          source.href = it.source_url || "#";
+          source.textContent = "🔗";
+          source.title = "open original source";
+          source.target = "_blank";
+          source.rel = "noopener noreferrer";
           top.appendChild(source);
         }
-        const meta = document.createElement('div');
-        meta.className = 'hi-meta';
+        const meta = document.createElement("div");
+        meta.className = "hi-meta";
         // Duration badge
         try {
           const s = it.started_at ? new Date(it.started_at).getTime() : NaN;
           const c = it.completed_at ? new Date(it.completed_at).getTime() : NaN;
           if (!Number.isNaN(s) && !Number.isNaN(c) && c >= s) {
-            const secs = ((c - s) / 1000);
-            const label = secs >= 10 ? Math.round(secs) + 's' : secs.toFixed(1) + 's';
-            const b = document.createElement('span');
-            b.className = 'badge';
+            const secs = (c - s) / 1000;
+            const label = secs >= 10 ? Math.round(secs) + "s" : secs.toFixed(1) + "s";
+            const b = document.createElement("span");
+            b.className = "badge";
             b.textContent = label;
             meta.appendChild(b);
           }
         } catch {}
-        const time = document.createElement('span');
+        const time = document.createElement("span");
         const d = new Date(it.completed_at || it.started_at || Date.now());
         time.textContent = d.toLocaleString();
         meta.appendChild(time);
@@ -993,43 +1180,46 @@ async function main() {
       return;
     } catch {}
     // Fallback to legacy local list
-    const { recentSaves } = await getStorage(['recentSaves']);
+    const { recentSaves } = await getStorage(["recentSaves"]);
     const items = Array.isArray(recentSaves) ? recentSaves : [];
-    if (!items.length) { historyStatus.textContent = 'No recent saves yet.'; return; }
+    if (!items.length) {
+      historyStatus.textContent = "No recent saves yet.";
+      return;
+    }
     for (const it of items) {
-      const li = document.createElement('li');
-      li.className = 'history-item';
-      const top = document.createElement('div');
-      top.className = 'hi-top';
-      const title = document.createElement('a');
-      title.className = 'hi-title';
-      title.href = it.url || '#';
-      title.textContent = it.title || 'Untitled';
-      title.target = '_blank';
-      title.rel = 'noopener noreferrer';
+      const li = document.createElement("li");
+      li.className = "history-item";
+      const top = document.createElement("div");
+      top.className = "hi-top";
+      const title = document.createElement("a");
+      title.className = "hi-title";
+      title.href = it.url || "#";
+      title.textContent = it.title || "Untitled";
+      title.target = "_blank";
+      title.rel = "noopener noreferrer";
       top.appendChild(title);
       if (it.sourceUrl) {
-        const source = document.createElement('a');
-        source.className = 'hi-source';
-        source.href = it.sourceUrl || '#';
-        source.textContent = '🔗';
-        source.title = 'open original source';
-        source.target = '_blank';
-        source.rel = 'noopener noreferrer';
+        const source = document.createElement("a");
+        source.className = "hi-source";
+        source.href = it.sourceUrl || "#";
+        source.textContent = "🔗";
+        source.title = "open original source";
+        source.target = "_blank";
+        source.rel = "noopener noreferrer";
         top.appendChild(source);
       }
-      const meta = document.createElement('div');
-      meta.className = 'hi-meta';
-      if (typeof it.durationMs === 'number' && it.durationMs > 0) {
+      const meta = document.createElement("div");
+      meta.className = "hi-meta";
+      if (typeof it.durationMs === "number" && it.durationMs > 0) {
         const secs = it.durationMs / 1000;
-        const label = secs >= 10 ? Math.round(secs) + 's' : secs.toFixed(1) + 's';
-        const b = document.createElement('span');
-        b.className = 'badge';
+        const label = secs >= 10 ? Math.round(secs) + "s" : secs.toFixed(1) + "s";
+        const b = document.createElement("span");
+        b.className = "badge";
         b.textContent = label;
         meta.appendChild(b);
       }
-      const time = document.createElement('span');
-      const d = new Date(typeof it.ts === 'number' ? it.ts : Date.now());
+      const time = document.createElement("span");
+      const d = new Date(typeof it.ts === "number" ? it.ts : Date.now());
       time.textContent = d.toLocaleString();
       meta.appendChild(time);
       li.appendChild(top);
@@ -1038,43 +1228,43 @@ async function main() {
     }
   }
 
-  openHistoryBtn.addEventListener('click', async () => {
+  openHistoryBtn.addEventListener("click", async () => {
     // Determine which view is currently visible
     try {
-      const appVisible = getComputedStyle(appView).display !== 'none';
-      const tokensVisible = getComputedStyle(tokensView).display !== 'none';
-      const dbSettingsVisible = getComputedStyle(dbSettingsView).display !== 'none';
-      if (tokensVisible) lastView = 'tokens';
-      else if (dbSettingsVisible) lastView = 'dbSettings';
-      else lastView = 'app';
+      const appVisible = getComputedStyle(appView).display !== "none";
+      const tokensVisible = getComputedStyle(tokensView).display !== "none";
+      const dbSettingsVisible = getComputedStyle(dbSettingsView).display !== "none";
+      if (tokensVisible) lastView = "tokens";
+      else if (dbSettingsVisible) lastView = "dbSettings";
+      else lastView = "app";
     } catch {
-      if (tokensView && tokensView.style.display !== 'none') lastView = 'tokens';
-      else if (dbSettingsView && dbSettingsView.style.display !== 'none') lastView = 'dbSettings';
-      else lastView = 'app';
+      if (tokensView && tokensView.style.display !== "none") lastView = "tokens";
+      else if (dbSettingsView && dbSettingsView.style.display !== "none") lastView = "dbSettings";
+      else lastView = "app";
     }
 
     // Hide all other views and show history
-    if (appView) appView.style.display = 'none';
-    if (tokensView) tokensView.style.display = 'none';
-    if (dbSettingsView) dbSettingsView.style.display = 'none';
-    historyView.style.display = 'block';
+    if (appView) appView.style.display = "none";
+    if (tokensView) tokensView.style.display = "none";
+    if (dbSettingsView) dbSettingsView.style.display = "none";
+    historyView.style.display = "block";
     await loadHistory();
   });
-  backBtn.addEventListener('click', () => {
-    historyView.style.display = 'none';
-    if (lastView === 'tokens') tokensView.style.display = 'block';
-    else if (lastView === 'dbSettings') dbSettingsView.style.display = 'block';
-    else appView.style.display = 'block';
+  backBtn.addEventListener("click", () => {
+    historyView.style.display = "none";
+    if (lastView === "tokens") tokensView.style.display = "block";
+    else if (lastView === "dbSettings") dbSettingsView.style.display = "block";
+    else appView.style.display = "block";
   });
 
   async function loadUntitled() {
-    untitledStatus.textContent = 'Searching untitled databases...';
-    untitledList.innerHTML = '';
+    untitledStatus.textContent = "Searching untitled databases...";
+    untitledList.innerHTML = "";
     try {
       let items = [];
       try {
-        const res = await chrome.runtime.sendMessage({ type: 'LIST_UNTITLED_DATABASES' });
-        if (!res?.ok) throw new Error(res?.error || 'Search error (background)');
+        const res = await chrome.runtime.sendMessage({ type: "LIST_UNTITLED_DATABASES" });
+        if (!res?.ok) throw new Error(res?.error || "Search error (background)");
         items = res.databases || [];
       } catch (err) {
         // Fallback: query Notion directly via Options helper if background fails
@@ -1082,12 +1272,12 @@ async function main() {
       }
       untitledStatus.textContent = `Found ${items.length} untitled databases`;
       for (const db of items) {
-        const li = document.createElement('li');
-        const a = document.createElement('a');
-        a.href = db.url || `https://www.notion.so/${String(db.id || '').replace(/-/g, '')}`;
+        const li = document.createElement("li");
+        const a = document.createElement("a");
+        a.href = db.url || `https://www.notion.so/${String(db.id || "").replace(/-/g, "")}`;
         a.textContent = db.title ? `${db.title}` : `${db.id}`;
-        a.target = '_blank';
-        a.rel = 'noopener noreferrer';
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
         li.appendChild(a);
         untitledList.appendChild(li);
       }
@@ -1096,66 +1286,82 @@ async function main() {
     }
   }
 
-  if (openUntitledBtn) openUntitledBtn.addEventListener('click', async () => {
-    try {
-      const appVisible = getComputedStyle(appView).display !== 'none';
-      const tokensVisible = getComputedStyle(tokensView).display !== 'none';
-      const dbSettingsVisible = getComputedStyle(dbSettingsView).display !== 'none';
-      if (tokensVisible) lastView = 'tokens';
-      else if (dbSettingsVisible) lastView = 'dbSettings';
-      else lastView = 'app';
-    } catch { lastView = 'app'; }
-    if (appView) appView.style.display = 'none';
-    if (tokensView) tokensView.style.display = 'none';
-    if (dbSettingsView) dbSettingsView.style.display = 'none';
-    untitledView.style.display = 'block';
-    await loadUntitled();
-  });
-  if (untitledBack) untitledBack.addEventListener('click', () => {
-    untitledView.style.display = 'none';
-    if (lastView === 'tokens') tokensView.style.display = 'block';
-    else if (lastView === 'dbSettings') dbSettingsView.style.display = 'block';
-    else appView.style.display = 'block';
-  });
-  clearBtn.addEventListener('click', async () => {
+  if (openUntitledBtn)
+    openUntitledBtn.addEventListener("click", async () => {
+      try {
+        const appVisible = getComputedStyle(appView).display !== "none";
+        const tokensVisible = getComputedStyle(tokensView).display !== "none";
+        const dbSettingsVisible = getComputedStyle(dbSettingsView).display !== "none";
+        if (tokensVisible) lastView = "tokens";
+        else if (dbSettingsVisible) lastView = "dbSettings";
+        else lastView = "app";
+      } catch {
+        lastView = "app";
+      }
+      if (appView) appView.style.display = "none";
+      if (tokensView) tokensView.style.display = "none";
+      if (dbSettingsView) dbSettingsView.style.display = "none";
+      untitledView.style.display = "block";
+      await loadUntitled();
+    });
+  if (untitledBack)
+    untitledBack.addEventListener("click", () => {
+      untitledView.style.display = "none";
+      if (lastView === "tokens") tokensView.style.display = "block";
+      else if (lastView === "dbSettings") dbSettingsView.style.display = "block";
+      else appView.style.display = "block";
+    });
+  clearBtn.addEventListener("click", async () => {
     await setStorage({ recentSaves: [] });
     await loadHistory();
   });
 
   // Enter to save (Intro). Shift+Enter inserts a newline in textarea
-  document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Enter' || e.shiftKey) return;
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" || e.shiftKey) return;
     const appViewVisible = (() => {
-      const appViewEl = document.getElementById('app');
+      const appViewEl = document.getElementById("app");
       if (!appViewEl) return false;
-      try { return getComputedStyle(appViewEl).display !== 'none'; } catch { return appViewEl.style.display !== 'none'; }
+      try {
+        return getComputedStyle(appViewEl).display !== "none";
+      } catch {
+        return appViewEl.style.display !== "none";
+      }
     })();
     if (!appViewVisible) return; // only on main view
     const target = e.target;
     // ignore combobox search
-    if (target && target.id === 'dbComboSearch') return;
+    if (target && target.id === "dbComboSearch") return;
     // In textarea (#note) Enter submits; Shift+Enter handled above to insert newline
     e.preventDefault();
     save();
   });
 
   // Start polling active runs whenever the popup is shown; stop when hidden/unloaded
-  try { startActiveRunsPolling(); } catch {}
   try {
-    window.addEventListener('unload', () => { try { stopActiveRunsPolling(); } catch {} });
-    document.addEventListener('visibilitychange', () => {
+    startActiveRunsPolling();
+  } catch {}
+  try {
+    window.addEventListener("unload", () => {
       try {
-        if (document.visibilityState === 'visible') startActiveRunsPolling();
+        stopActiveRunsPolling();
+      } catch {}
+    });
+    document.addEventListener("visibilitychange", () => {
+      try {
+        if (document.visibilityState === "visible") startActiveRunsPolling();
         else stopActiveRunsPolling();
       } catch {}
     });
   } catch {}
 
   // Last saved hint
-  try { await renderLastSavedHint(); } catch {}
+  try {
+    await renderLastSavedHint();
+  } catch {}
 }
 
 main().catch((e) => {
-  const status = document.getElementById('status');
+  const status = document.getElementById("status");
   status.textContent = String(e?.message || e);
 });

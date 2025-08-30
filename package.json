@@ -9,8 +9,11 @@
     "packages/*"
   ],
   "scripts": {
-    "package:extension": "bun scripts/package-extension.ts"
+    "package:extension": "bun scripts/package-extension.ts",
+    "format": "biome format --write .",
+    "format:check": "biome format ."
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.2.2"
   }
 }
-
-

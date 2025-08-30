@@ -3,12 +3,7 @@
   "name": "Notion Magic Clipper",
   "version": "0.1.5",
   "description": "Notion Magic Clipper: Clip the web to Notion with a bit of magic ✨",
-  "permissions": [
-    "storage",
-    "activeTab",
-    "scripting",
-    "tabs"
-  ],
+  "permissions": ["storage", "activeTab", "scripting", "tabs"],
   "host_permissions": [
     "https://api.notion.com/*",
     "https://api.openai.com/*",
@@ -36,5 +31,4 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   }
-  
 }

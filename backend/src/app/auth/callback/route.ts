@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server';
-import env from '@/lib/env';
+import { NextRequest, NextResponse } from "next/server";
+import env from "@/lib/env";
 
 // Serve a small HTML bridge that reads tokens from the URL fragment and
 // posts them to /api/auth/session to set a server cookie, then redirects.
@@ -33,7 +33,5 @@ export async function GET(_req: NextRequest) {
     location.replace('/api/notion/start');
   })();
   </script></body></html>`;
-  return new NextResponse(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+  return new NextResponse(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
-
-
