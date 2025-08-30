@@ -391,6 +391,67 @@ function orderDatabasesByRecentUsage(list, recentSaves, lastDatabaseId) {
   return scored.map((s) => s.d);
 }
 
+function formatRelativeTime(to) {
+  try {
+    const now = Date.now();
+    const t = typeof to === 'number' ? to : (to instanceof Date ? to.getTime() : new Date(to).getTime());
+    if (Number.isNaN(t)) return '';
+    const delta = Math.max(0, now - t);
+    const sec = Math.round(delta / 1000);
+    if (sec < 60) return `${sec}s ago`;
+    const min = Math.round(sec / 60);
+    if (min < 60) return `${min} minute${min === 1 ? '' : 's'} ago`;
+    const hr = Math.round(min / 60);
+    if (hr < 24) return `${hr} hour${hr === 1 ? '' : 's'} ago`;
+    const day = Math.round(hr / 24);
+    if (day < 7) return `${day} day${day === 1 ? '' : 's'} ago`;
+    const wk = Math.round(day / 7);
+    if (wk < 4) return `${wk} week${wk === 1 ? '' : 's'} ago`;
+    const mo = Math.round(day / 30);
+    if (mo < 12) return `${mo} month${mo === 1 ? '' : 's'} ago`;
+    const yr = Math.round(day / 365);
+    return `${yr} year${yr === 1 ? '' : 's'} ago`;
+  } catch { return ''; }
+}
+
+async function renderLastSavedHint() {
+  const el = document.getElementById('lastSaved');
+  if (!el) return;
+  try {
+    const { backendUrl, recentSaves } = await getStorage(['backendUrl', 'recentSaves']);
+    const base = (backendUrl || 'http://localhost:3000').replace(/\/$/, '');
+    // Prefer backend recent saves for logged-in users
+    let ts = null;
+    try {
+      const resp = await fetch(`${base}/api/clip/await?recent=1`, { credentials: 'include' });
+      if (resp.ok) {
+        const j = await resp.json().catch(() => ({}));
+        const items = Array.isArray(j?.saves) ? j.saves : [];
+        if (items.length && items[0]?.completed_at) ts = new Date(items[0].completed_at).getTime();
+        else if (items.length && items[0]?.started_at) ts = new Date(items[0].started_at).getTime();
+      }
+    } catch {}
+    if (ts == null) {
+      const local = Array.isArray(recentSaves) ? recentSaves : [];
+      if (local.length) ts = typeof local[0].ts === 'number' ? local[0].ts : Date.now();
+    }
+    if (!ts) { el.textContent = ''; return; }
+    const rel = formatRelativeTime(ts);
+    const link = document.createElement('a');
+    link.href = '#';
+    link.textContent = rel || 'recent';
+    link.title = 'Open recent saves';
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('openHistory');
+      if (btn) btn.click();
+    });
+    el.innerHTML = '';
+    el.appendChild(document.createTextNode('Last clip saved '));
+    el.appendChild(link);
+  } catch { el.textContent = ''; }
+}
+
 // --- Active Trigger runs UI ---
 let activeRunsTimer = null;
 let lastActiveRunsHtml = '';
@@ -1089,6 +1150,9 @@ async function main() {
       } catch {}
     });
   } catch {}
+
+  // Last saved hint
+  try { await renderLastSavedHint(); } catch {}
 }
 
 main().catch((e) => {

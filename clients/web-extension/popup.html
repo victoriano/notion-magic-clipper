@@ -23,13 +23,14 @@
         color-scheme: light;
       }
       * { box-sizing: border-box; }
-      body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif; margin: 12px 12px 8px 12px; min-width: 300px; background: var(--background); color: var(--foreground); }
+      body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif; margin: 12px 12px 20px 12px; min-width: 300px; background: var(--background); color: var(--foreground); }
       .row { display: flex; gap: 8px; align-items: center; }
       label { display: block; margin: 8px 0 4px; font-weight: 600; color: var(--foreground); }
       small { color: var(--muted-foreground); }
       #status { margin-top: 12px; min-height: 1.2em; }
+      #status:empty { display: none; }
       a { color: var(--primary); }
-      .card { background: var(--card); color: var(--card-foreground); border: none; border-radius: 0; box-shadow: none; padding: 12px 12px 8px 12px; }
+      .card { background: var(--card); color: var(--card-foreground); border: none; border-radius: 0; box-shadow: none; padding: 12px 12px 0px 12px; }
       .title { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; letter-spacing: 0.01em; }
       .app-title { margin: 0; display: flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 700; letter-spacing: 0.01em; }
       /* Inputs */
@@ -96,6 +97,7 @@
       .divider { height: 1px; background: var(--border); border: 0; margin: 14px 0; }
       /* Active runs list */
       #activeRuns { margin-top: 8px; color: var(--muted-foreground); }
+      #activeRuns:empty { display: none; }
       .active-run { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 13px; }
       .active-run strong { color: var(--foreground); font-weight: 600; }
       /* Recent saves (shadcn-inspired) */
@@ -108,6 +110,9 @@
       .hi-source:hover { color: var(--foreground); }
       .hi-meta { margin-top: 4px; display: flex; align-items: center; gap: 8px; color: var(--muted-foreground); font-size: 12px; }
       .badge { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; background: var(--muted); border: 1px solid var(--border); color: var(--foreground); font-size: 12px; }
+      /* Last saved hint */
+      #lastSaved { margin-top: 20px; color: var(--muted-foreground); font-size: 12px; }
+      #lastSaved a { color: var(--muted-foreground); text-decoration: underline; }
     </style>
   </head>
   <body>
@@ -163,6 +168,7 @@
           <button id="save" class="btn btn-primary">Save to Notion</button>
           <span class="kbd-hint">Intro</span>
         </div>
+        <div id="lastSaved"></div>
         <div id="status"></div>
         <div id="activeRuns"></div>
       </div>
