@@ -521,6 +521,12 @@ async function renderLastSavedHint() {
     link.title = "Open recent saves";
     link.addEventListener("click", (e) => {
       e.preventDefault();
+      try {
+        if (typeof window !== "undefined" && typeof window.openHistoryView === "function") {
+          window.openHistoryView();
+          return;
+        }
+      } catch {}
       const btn = document.getElementById("openHistory");
       if (btn) btn.click();
     });
@@ -1421,6 +1427,29 @@ async function main() {
     await setStorage({ recentSaves: [] });
     await loadHistory();
   });
+
+  // Expose a helper to open the history view (used by "Last clip saved" link)
+  try {
+    window.openHistoryView = async () => {
+      try {
+        const appVisible = getComputedStyle(appView).display !== "none";
+        const tokensVisible = getComputedStyle(tokensView).display !== "none";
+        const dbSettingsVisible = getComputedStyle(dbSettingsView).display !== "none";
+        if (tokensVisible) lastView = "tokens";
+        else if (dbSettingsVisible) lastView = "dbSettings";
+        else lastView = "app";
+      } catch {
+        if (tokensView && tokensView.style.display !== "none") lastView = "tokens";
+        else if (dbSettingsView && dbSettingsView.style.display !== "none") lastView = "dbSettings";
+        else lastView = "app";
+      }
+      if (appView) appView.style.display = "none";
+      if (tokensView) tokensView.style.display = "none";
+      if (dbSettingsView) dbSettingsView.style.display = "none";
+      historyView.style.display = "block";
+      await loadHistory();
+    };
+  } catch {}
 
   // Enter to save (Intro). Shift+Enter inserts a newline in textarea
   document.addEventListener("keydown", (e) => {
