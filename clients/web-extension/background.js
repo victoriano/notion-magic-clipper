@@ -941,6 +941,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           });
         } catch {}
         if (!resp.ok) {
+          if (resp.status === 429) {
+            const limit = parseInt(resp.headers.get("X-RateLimit-Limit") || "0", 10) || 0;
+            const remaining = parseInt(resp.headers.get("X-RateLimit-Remaining") || "0", 10) || 0;
+            const retryAfter = parseInt(resp.headers.get("Retry-After") || "0", 10) || 0; // seconds
+            function fmtRetry(sec) {
+              if (!sec || sec <= 0) return "later";
+              const m = Math.round(sec / 60);
+              if (m < 1) return `${sec}s`;
+              if (m < 60) return `${m} minute${m === 1 ? "" : "s"}`;
+              const h = Math.round(m / 60);
+              return `${h} hour${h === 1 ? "" : "s"}`;
+            }
+            const contact =
+              '<a href="mailto:me@victoriano.me?subject=Pro%20Upgrade%20Request">me@victoriano.me</a>';
+            const friendly =
+              `Daily limit reached (${limit || 2} saves/day). ` +
+              `Please try again in ${fmtRetry(retryAfter)} or contact ${contact} for a Pro account.`;
+            sendResponse({ ok: false, error: friendly, status: 429, limit, remaining });
+            return;
+          }
           const text = await resp.text().catch(() => "");
           try {
             dbgBg("BACKEND_RESPONSE_BODY_ERR", text.slice(0, 2000));

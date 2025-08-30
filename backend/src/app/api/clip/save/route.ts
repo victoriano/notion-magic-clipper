@@ -401,6 +401,7 @@ export async function POST(req: NextRequest) {
   if (!supabaseAdmin)
     return withCors(req, NextResponse.json({ error: "Server misconfigured" }, { status: 500 }));
   try {
+    const admin = supabaseAdmin!;
     const body = await req.json();
     const databaseId: string = body?.databaseId;
     const pageContext = body?.pageContext;
@@ -425,6 +426,45 @@ export async function POST(req: NextRequest) {
         req,
         NextResponse.json({ error: "Missing databaseId or pageContext" }, { status: 400 }),
       );
+
+    // --- Simple per-user daily limit (except pro users) ---
+    const MAX_SAVES_PER_DAY = 2;
+    async function isProUser(): Promise<boolean> {
+      try {
+        const { data: plan } = await admin
+          .from("user_plans")
+          .select("is_pro")
+          .eq("user_id", userId)
+          .maybeSingle();
+        return !!plan?.is_pro;
+      } catch {
+        return false;
+      }
+    }
+    const pro = await isProUser();
+    if (!pro) {
+      const start = new Date();
+      start.setHours(0, 0, 0, 0);
+      const { count, error: cntErr } = await supabaseAdmin
+        .from("notion_saves")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userId)
+        .gte("started_at", start.toISOString());
+      const used = typeof count === "number" && count >= 0 ? count : 0;
+      const remaining = Math.max(0, MAX_SAVES_PER_DAY - used);
+      if (!cntErr && used >= MAX_SAVES_PER_DAY) {
+        const res = NextResponse.json(
+          { error: "Daily save limit reached. Upgrade to Pro for higher limits." },
+          { status: 429 },
+        );
+        res.headers.set("X-RateLimit-Limit", String(MAX_SAVES_PER_DAY));
+        res.headers.set("X-RateLimit-Remaining", String(0));
+        // Retry at midnight
+        const retry = Math.ceil((24 * 60 * 60 * 1000 - (Date.now() - start.getTime())) / 1000);
+        res.headers.set("Retry-After", String(retry));
+        return withCors(req, res);
+      }
+    }
 
     // If Trigger.dev is configured, enqueue the work and return immediately (asynchronous processing)
     const hasTrigger =
@@ -512,7 +552,25 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const { data: rows, error } = await supabaseAdmin
+    // For synchronous path, pre-insert a save row for counting and observability
+    let syncSaveId: string | null = null;
+    try {
+      const { data: inserted, error: insErr } = await supabaseAdmin
+        .from("notion_saves")
+        .insert({
+          user_id: userId,
+          database_id: databaseId,
+          source_url: pageContext?.url || "",
+          status: "running",
+          provider,
+          model,
+        })
+        .select()
+        .single();
+      if (!insErr) syncSaveId = inserted?.id || null;
+    } catch {}
+
+    const { data: rows, error } = await admin
       .from("notion_connections")
       .select("workspace_id, access_token")
       .eq("user_id", userId);
@@ -1194,6 +1252,20 @@ export async function POST(req: NextRequest) {
       { method: "POST", body: JSON.stringify(bodyCreate) },
       notionToken,
     );
+    try {
+      if (syncSaveId) {
+        await admin
+          .from("notion_saves")
+          .update({
+            status: "succeeded",
+            notion_page_id: created?.id || null,
+            notion_page_url: created?.url || created?.public_url || null,
+            completed_at: new Date().toISOString(),
+          })
+          .eq("id", syncSaveId)
+          .eq("user_id", userId);
+      }
+    } catch {}
     // Append remaining children if any
     const rest = Array.isArray(children) ? children.slice(100) : [];
     const parentId = created?.id;

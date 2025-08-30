@@ -769,7 +769,19 @@ async function save() {
   });
   if (!res?.ok) {
     console.log(`[NotionMagicClipper][Popup ${new Date().toISOString()}] Save failed:`, res?.error);
-    status.innerHTML = `<span class="error">${res?.error || "Error saving"}</span>`;
+    (function showFriendly429() {
+      try {
+        const err = String(res?.error || "");
+        const hit429 = res?.status === 429 || /^Backend 429/i.test(err);
+        if (hit429) {
+          const contact = '<a href="mailto:me@victoriano.me?subject=Pro%20Upgrade%20Request">me@victoriano.me</a>';
+          const msg = `Daily limit reached (2 saves/day). Please try again later or contact ${contact} for a Pro account.`;
+          status.innerHTML = `<span class="error">${msg}</span>`;
+          return;
+        }
+      } catch {}
+      status.innerHTML = `<span class="error">${res?.error || "Error saving"}</span>`;
+    })();
     try {
       stopActiveRunsPolling();
     } catch {}
