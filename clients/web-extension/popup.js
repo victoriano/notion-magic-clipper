@@ -111,6 +111,12 @@ function setSelectedDb(id) {
   // update settings link label without destroying icon
   const openBtnLabel = document.getElementById("openDbSettingsLabel");
   if (openBtnLabel) openBtnLabel.textContent = "Custom save format";
+  // Prefetch schema (simplified) for the selected DB; backend returns 304 if unchanged
+  if (dbSelectedId) {
+    try {
+      chrome.runtime.sendMessage({ type: "GET_DB_SCHEMA", databaseId: dbSelectedId });
+    } catch {}
+  }
 }
 
 function filterDbList(term) {
@@ -1054,12 +1060,32 @@ async function main() {
           ? `${currentDb.iconEmoji ? currentDb.iconEmoji + " " : ""}${currentDb.title}`
           : "";
       }
-      const { databaseSettings } = await getStorage(["databaseSettings"]);
-      const settingsForDb = (databaseSettings || {})[dbSelectedId] || {};
-      dbsPrompt.value = settingsForDb.prompt || "";
-      dbsSaveArticle.checked = settingsForDb.saveArticle !== false;
-      dbsCustomize.checked = settingsForDb.customizeContent === true;
-      dbsContentPrompt.value = settingsForDb.contentPrompt || "";
+      // Load settings from backend
+      try {
+        const res = await chrome.runtime.sendMessage({ type: "GET_DB_SETTINGS", databaseId: dbSelectedId });
+        if (res?.ok && res?.settings) {
+          const s = res.settings;
+          dbsPrompt.value = s.prompt || "";
+          dbsSaveArticle.checked = s.saveArticle !== false;
+          dbsCustomize.checked = s.customizeContent === true;
+          dbsContentPrompt.value = s.contentPrompt || "";
+        } else {
+          // fallback to local
+          const { databaseSettings } = await getStorage(["databaseSettings"]);
+          const local = (databaseSettings || {})[dbSelectedId] || {};
+          dbsPrompt.value = local.prompt || "";
+          dbsSaveArticle.checked = local.saveArticle !== false;
+          dbsCustomize.checked = local.customizeContent === true;
+          dbsContentPrompt.value = local.contentPrompt || "";
+        }
+      } catch {
+        const { databaseSettings } = await getStorage(["databaseSettings"]);
+        const local = (databaseSettings || {})[dbSelectedId] || {};
+        dbsPrompt.value = local.prompt || "";
+        dbsSaveArticle.checked = local.saveArticle !== false;
+        dbsCustomize.checked = local.customizeContent === true;
+        dbsContentPrompt.value = local.contentPrompt || "";
+      }
       updateCustomizeVisibility();
       appView.style.display = "none";
       dbSettingsView.style.display = "block";
@@ -1071,17 +1097,32 @@ async function main() {
     });
   if (dbsSave)
     dbsSave.addEventListener("click", async () => {
-      const { databaseSettings } = await getStorage(["databaseSettings"]);
-      const map = databaseSettings && typeof databaseSettings === "object" ? databaseSettings : {};
-      map[dbSelectedId] = {
+      dbsStatus.textContent = "";
+      dbsStatus.classList.remove("success");
+      const toSave = {
         prompt: (dbsPrompt.value || "").trim(),
         saveArticle: !!dbsSaveArticle.checked,
         customizeContent: !!dbsCustomize.checked,
         contentPrompt: (dbsContentPrompt.value || "").trim(),
       };
-      await setStorage({ databaseSettings: map });
-      dbsStatus.textContent = "Saved ✓";
-      dbsStatus.classList.add("success");
+      try {
+        const r = await chrome.runtime.sendMessage({
+          type: "PUT_DB_SETTINGS",
+          databaseId: dbSelectedId,
+          settings: toSave,
+        });
+        if (!r?.ok) throw new Error(r?.error || "Failed to save settings");
+        dbsStatus.textContent = "Saved ✓";
+        dbsStatus.classList.add("success");
+      } catch (e) {
+        // Persist locally as a fallback
+        const { databaseSettings } = await getStorage(["databaseSettings"]);
+        const map = databaseSettings && typeof databaseSettings === "object" ? databaseSettings : {};
+        map[dbSelectedId] = toSave;
+        await setStorage({ databaseSettings: map });
+        dbsStatus.textContent = "Saved locally (offline)";
+        dbsStatus.classList.add("success");
+      }
     });
   if (dbsClear)
     dbsClear.addEventListener("click", async () => {

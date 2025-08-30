@@ -576,6 +576,135 @@ async function ensureSelectOptions(databaseId, props, token) {
 // Messaging handlers
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
+    if (message?.type === "GET_DB_SCHEMA") {
+      try {
+        const databaseId = message?.databaseId;
+        if (!databaseId) throw new Error("databaseId missing");
+        const cached = await new Promise((resolve) => {
+          chrome.storage.local.get(["dbSchemaCache"], (res) => resolve(res?.dbSchemaCache || {}));
+        });
+        const entry = cached[databaseId] || {};
+        const base = await getBackendBase();
+        const params = new URLSearchParams();
+        params.set("shape", "simplified");
+        if (entry?.version) params.set("version", String(entry.version));
+        const url = `${base}/api/databases/${encodeURIComponent(databaseId)}/schema?${params.toString()}`;
+        const resp = await fetch(url, { credentials: "include" });
+        if (resp.status === 304) {
+          sendResponse({ ok: true, schema: entry?.schema || null, version: entry?.version || null, fromCache: true, stale: false });
+          return;
+        }
+        if (!resp.ok) throw new Error(`Backend ${resp.status}`);
+        const data = await resp.json();
+        const schema = data?.schema || null;
+        const version = data?.version || null;
+        try {
+          const next = { ...(cached || {}) };
+          next[databaseId] = { version, schema, ts: Date.now() };
+          await setStorage({ dbSchemaCache: next });
+        } catch {}
+        sendResponse({ ok: true, schema, version, fromCache: false, stale: !!data?.stale });
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e?.message || e) });
+      }
+      return;
+    }
+
+    if (message?.type === "GET_DB_SETTINGS") {
+      try {
+        const databaseId = message?.databaseId;
+        if (!databaseId) throw new Error("databaseId missing");
+        const base = await getBackendBase();
+        const url = `${base}/api/databases/${encodeURIComponent(databaseId)}/settings`;
+        const resp = await fetch(url, { credentials: "include" });
+        if (!resp.ok) throw new Error(`Backend ${resp.status}`);
+        const data = await resp.json();
+        const settings = data?.settings || {
+          prompt: "",
+          save_article: true,
+          customize_content: false,
+          content_prompt: "",
+        };
+        // Normalize to popup expected casing for compatibility
+        const normalized = {
+          prompt: settings.prompt || "",
+          saveArticle: settings.save_article !== false,
+          customizeContent: settings.customize_content === true,
+          contentPrompt: settings.content_prompt || "",
+        };
+        try {
+          const cache = await new Promise((resolve) => {
+            chrome.storage.local.get(["dbSettingsCache"], (res) => resolve(res?.dbSettingsCache || {}));
+          });
+          const next = { ...(cache || {}) };
+          next[databaseId] = { ...normalized, ts: Date.now() };
+          await setStorage({ dbSettingsCache: next });
+        } catch {}
+        sendResponse({ ok: true, settings: normalized });
+      } catch (e) {
+        // Fallback to local legacy storage
+        try {
+          const { databaseSettings } = await getConfig();
+          const local = (databaseSettings || {})[message?.databaseId] || {};
+          const normalized = {
+            prompt: local.prompt || "",
+            saveArticle: local.saveArticle !== false,
+            customizeContent: local.customizeContent === true,
+            contentPrompt: local.contentPrompt || "",
+          };
+          sendResponse({ ok: true, settings: normalized, from: "local" });
+        } catch (err) {
+          sendResponse({ ok: false, error: String(e?.message || e) });
+        }
+      }
+      return;
+    }
+
+    if (message?.type === "PUT_DB_SETTINGS") {
+      try {
+        const databaseId = message?.databaseId;
+        const settings = message?.settings || {};
+        if (!databaseId) throw new Error("databaseId missing");
+        const base = await getBackendBase();
+        const url = `${base}/api/databases/${encodeURIComponent(databaseId)}/settings`;
+        const body = {
+          prompt: settings.prompt || "",
+          save_article: settings.saveArticle !== false,
+          customize_content: settings.customizeContent === true,
+          content_prompt: settings.contentPrompt || "",
+        };
+        const resp = await fetch(url, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify(body),
+        });
+        if (!resp.ok) throw new Error(`Backend ${resp.status}`);
+        const data = await resp.json();
+        const saved = data?.settings || {};
+        const normalized = {
+          prompt: saved.prompt || settings.prompt || "",
+          saveArticle: saved.save_article !== false,
+          customizeContent: saved.customize_content === true,
+          contentPrompt: saved.content_prompt || settings.contentPrompt || "",
+        };
+        // Update caches (new cache + legacy local for backward compat)
+        try {
+          const cache = await new Promise((resolve) => {
+            chrome.storage.local.get(["dbSettingsCache", "databaseSettings"], (res) => resolve(res));
+          });
+          const nextCache = { ...(cache?.dbSettingsCache || {}) };
+          nextCache[databaseId] = { ...normalized, ts: Date.now() };
+          const legacy = cache?.databaseSettings && typeof cache.databaseSettings === "object" ? cache.databaseSettings : {};
+          legacy[databaseId] = normalized;
+          await setStorage({ dbSettingsCache: nextCache, databaseSettings: legacy });
+        } catch {}
+        sendResponse({ ok: true, settings: normalized });
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e?.message || e) });
+      }
+      return;
+    }
     if (message?.type === "LIST_DATABASES") {
       try {
         const { notionSearchQuery } = await getConfig();
@@ -740,15 +869,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (!databaseId) throw new Error("databaseId faltante");
         if (!pageContext) throw new Error("pageContext faltante");
         dbgBg("SAVE_TO_NOTION: start", { databaseId, url: pageContext?.url });
-        const { backendUrl, llmProvider, llmModel, databasePrompts, databaseSettings } =
-          await getConfig();
-        const settingsForDb = (databaseSettings || {})[databaseId] || {};
-        const legacyPrompt = (databasePrompts || {})[databaseId] || "";
-        const customInstructions = (settingsForDb.prompt ?? legacyPrompt) || "";
+        const { backendUrl, llmProvider, llmModel, databasePrompts, databaseSettings } = await getConfig();
+        // Prefer backend settings; fallback to local legacy
+        let settingsForDb = null;
+        try {
+          const base = backendUrl ? backendUrl.replace(/\/$/, "") : await getBackendBase();
+          const sResp = await fetch(`${base}/api/databases/${encodeURIComponent(databaseId)}/settings`, { credentials: "include" });
+          if (sResp.ok) {
+            const sJson = await sResp.json().catch(() => ({}));
+            const s = sJson?.settings || {};
+            settingsForDb = {
+              prompt: s.prompt || "",
+              saveArticle: s.save_article !== false,
+              customizeContent: s.customize_content === true,
+              contentPrompt: s.content_prompt || "",
+            };
+          }
+        } catch {}
+        if (!settingsForDb) {
+          const legacy = (databaseSettings || {})[databaseId] || {};
+          const legacyPrompt = (databasePrompts || {})[databaseId] || "";
+          settingsForDb = {
+            prompt: legacy.prompt || legacyPrompt || "",
+            saveArticle: legacy.saveArticle !== false,
+            customizeContent: legacy.customizeContent === true,
+            contentPrompt: typeof legacy.contentPrompt === "string" ? legacy.contentPrompt.trim() : "",
+          };
+        }
+        const customInstructions = settingsForDb.prompt || "";
         const saveArticle = settingsForDb.saveArticle !== false;
         const customizeContent = settingsForDb.customizeContent === true;
-        const contentPrompt =
-          typeof settingsForDb.contentPrompt === "string" ? settingsForDb.contentPrompt.trim() : "";
+        const contentPrompt = typeof settingsForDb.contentPrompt === "string" ? settingsForDb.contentPrompt.trim() : "";
         const { openai_reasoning_effort, openai_verbosity } = await getConfig();
         const base = backendUrl ? backendUrl.replace(/\/$/, "") : await getBackendBase();
         const url = `${base}/api/clip/save`;
