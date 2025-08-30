@@ -781,7 +781,7 @@ async function save() {
         const hit429 = res?.status === 429 || /^Backend 429/i.test(err);
         if (hit429) {
           const contact = '<a href="mailto:me@victoriano.me?subject=Pro%20Upgrade%20Request">me@victoriano.me</a>';
-          const msg = `Daily limit reached (2 saves/day). Please try again later or contact ${contact} for a Pro account.`;
+          const msg = `Daily limit reached (10 saves/day). Please try again later or contact ${contact} for a Pro account.`;
           status.innerHTML = `<span class="error">${msg}</span>`;
           return;
         }

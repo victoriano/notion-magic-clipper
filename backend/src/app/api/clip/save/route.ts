@@ -428,7 +428,7 @@ export async function POST(req: NextRequest) {
       );
 
     // --- Simple per-user daily limit (except pro users) ---
-    const MAX_SAVES_PER_DAY = 2;
+    const MAX_SAVES_PER_DAY = 10;
     async function isProUser(): Promise<boolean> {
       try {
         const { data: plan } = await admin

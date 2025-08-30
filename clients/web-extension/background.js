@@ -956,7 +956,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const contact =
               '<a href="mailto:me@victoriano.me?subject=Pro%20Upgrade%20Request">me@victoriano.me</a>';
             const friendly =
-              `Daily limit reached (${limit || 2} saves/day). ` +
+              `Daily limit reached (${limit || 10} saves/day). ` +
               `Please try again in ${fmtRetry(retryAfter)} or contact ${contact} for a Pro account.`;
             sendResponse({ ok: false, error: friendly, status: 429, limit, remaining });
             return;
