@@ -950,6 +950,57 @@ async function main() {
       }
     });
 
+  // Delete account flow
+  const deleteAccountBtn = document.getElementById("deleteAccount");
+  if (deleteAccountBtn)
+    deleteAccountBtn.addEventListener("click", async () => {
+      const { backendUrl } = await getStorage(["backendUrl"]);
+      const base = (backendUrl || "https://magic-clipper.vercel.app").replace(/\/$/, "");
+      // Confirm dialog with manual typing
+      const msg = [
+        "This will permanently delete your account and ALL of its data (workspaces, caches, settings, saves).",
+        "This action cannot be undone.",
+        "\nTo proceed, type the word: confirm",
+      ].join(" \n");
+      const input = prompt(msg, "");
+      if (!input || input.trim().toLowerCase() !== "confirm") return;
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15000);
+        const resp = await fetch(`${base}/api/auth/account`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ reason: "user_initiated" }),
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        await setStorage({
+          notionToken: "",
+          workspaceTokens: {},
+          workspaceId: "",
+          databaseSettings: {},
+          databasePrompts: {},
+          recentSaves: [],
+          lastDatabaseId: "",
+          dbIndexCache: {},
+          dbSchemaCache: {},
+          dbSettingsCache: {},
+          authLoggedIn: false,
+        });
+        tokensStatus.textContent = "Account deleted. You have been logged out.";
+        tokensStatus.classList.add("success");
+        // Return to main view and reset UI
+        try {
+          const list = document.getElementById("linkedWorkspaces");
+          if (list) list.innerHTML = '<li style="color:#999">No workspaces (not logged in)</li>';
+        } catch {}
+      } catch (e) {
+        tokensStatus.textContent = `Deletion failed: ${String(e?.message || e)}`;
+      }
+    });
+
   // Toggle extra context
   const toggleNoteBtn = document.getElementById("toggleNoteBtn");
   if (toggleNoteBtn)
@@ -1269,34 +1320,36 @@ async function main() {
     }
   }
 
-  openHistoryBtn.addEventListener("click", async () => {
-    // Determine which view is currently visible
-    try {
-      const appVisible = getComputedStyle(appView).display !== "none";
-      const tokensVisible = getComputedStyle(tokensView).display !== "none";
-      const dbSettingsVisible = getComputedStyle(dbSettingsView).display !== "none";
-      if (tokensVisible) lastView = "tokens";
-      else if (dbSettingsVisible) lastView = "dbSettings";
-      else lastView = "app";
-    } catch {
-      if (tokensView && tokensView.style.display !== "none") lastView = "tokens";
-      else if (dbSettingsView && dbSettingsView.style.display !== "none") lastView = "dbSettings";
-      else lastView = "app";
-    }
+  if (openHistoryBtn)
+    openHistoryBtn.addEventListener("click", async () => {
+      // Determine which view is currently visible
+      try {
+        const appVisible = getComputedStyle(appView).display !== "none";
+        const tokensVisible = getComputedStyle(tokensView).display !== "none";
+        const dbSettingsVisible = getComputedStyle(dbSettingsView).display !== "none";
+        if (tokensVisible) lastView = "tokens";
+        else if (dbSettingsVisible) lastView = "dbSettings";
+        else lastView = "app";
+      } catch {
+        if (tokensView && tokensView.style.display !== "none") lastView = "tokens";
+        else if (dbSettingsView && dbSettingsView.style.display !== "none") lastView = "dbSettings";
+        else lastView = "app";
+      }
 
-    // Hide all other views and show history
-    if (appView) appView.style.display = "none";
-    if (tokensView) tokensView.style.display = "none";
-    if (dbSettingsView) dbSettingsView.style.display = "none";
-    historyView.style.display = "block";
-    await loadHistory();
-  });
-  backBtn.addEventListener("click", () => {
-    historyView.style.display = "none";
-    if (lastView === "tokens") tokensView.style.display = "block";
-    else if (lastView === "dbSettings") dbSettingsView.style.display = "block";
-    else appView.style.display = "block";
-  });
+      // Hide all other views and show history
+      if (appView) appView.style.display = "none";
+      if (tokensView) tokensView.style.display = "none";
+      if (dbSettingsView) dbSettingsView.style.display = "none";
+      historyView.style.display = "block";
+      await loadHistory();
+    });
+  if (backBtn)
+    backBtn.addEventListener("click", () => {
+      historyView.style.display = "none";
+      if (lastView === "tokens") tokensView.style.display = "block";
+      else if (lastView === "dbSettings") dbSettingsView.style.display = "block";
+      else appView.style.display = "block";
+    });
 
   async function loadUntitled() {
     untitledStatus.textContent = "Searching untitled databases...";
